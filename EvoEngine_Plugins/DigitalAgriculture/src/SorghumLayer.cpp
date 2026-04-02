@@ -16,6 +16,7 @@
 #include "SorghumCoordinates.hpp"
 #include "SorghumDescriptor.hpp"
 #include "SorghumFieldGrid.hpp"
+#include "SorghumTraitDescriptor.hpp"
 #ifdef CUDA_MODULE_PLUGIN
 #  include "CBTFGroup.hpp"
 #  include "PARSensorGroup.hpp"
@@ -40,6 +41,8 @@ AssetRegistration<CBTFGroup> cbtfg_registry("CBTFGroup", {".cbtfgroup"});
 #endif
 AssetRegistration<SkyIlluminance> si_registry("SkyIlluminance", {".skyilluminance"});
 AssetRegistration<SorghumCoordinates> sc_registry("SorghumCoordinates", {".sorghumcoords"});
+
+AssetRegistration<SorghumTraitDescriptor> st_registry("SorghumTraitDescriptor", {".st"});
 
 void SorghumLayer::OnCreate() {
   if (!leaf_material.Get<Material>()) {
