@@ -147,6 +147,7 @@ struct TriangularMesh {
       hit_info.data = glm::vec3(vx.vertex_info1, vx.vertex_info2, vx.vertex_info3);
       hit_info.data2 = vx.vertex_info4;
     }
+    hit_info.triangle_index = primitive_id;
     return hit_info;
   }
 
