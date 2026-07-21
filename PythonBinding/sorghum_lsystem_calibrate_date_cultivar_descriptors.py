@@ -26,13 +26,18 @@ from sorghum_asset_layout import (
     growth_stage,
 )
 from statistics import fmean
-from sorghum_migrate_fidelity_v4_descriptors import STAGES as FIDELITY_STAGE_VALUES, migrate as migrate_fidelity_v4
+from sorghum_migrate_fidelity_v4_descriptors import (
+    LEAF_MAX_LENGTH_M,
+    STAGES as FIDELITY_STAGE_VALUES,
+    TARGET_GDD_BY_STAGE,
+    migrate as migrate_fidelity_v4,
+)
 
 
 BASE_SCENE = MANUAL_4X10_SCENE.as_posix()
 DEFAULT_OUTPUT_ASSET_ROOT = GENERATED_DESCRIPTOR_ROOT
 LEAF_WIDTH_SCALE_BY_DATE = {
-    date: 1.0
+    date: FIDELITY_STAGE_VALUES[growth_stage(date)][1] / FIDELITY_STAGE_VALUES["GrowthStage04"][1]
     for date in ("2021-07-01", "2021-07-14", "2021-08-18", "2021-08-30", "2021-09-02")
 }
 MAIN_CULM_DIAMETER_M_BY_DATE = {
@@ -53,6 +58,12 @@ TARGET_COLUMNS = (
     "validation_leaf_std",
     "validation_height_mean_m",
     "validation_height_std_m",
+    "validation_main_culm_tip_height_ratio_mean",
+    "validation_main_culm_mature_collar_height_ratio_mean",
+    "validation_main_culm_max_blade_length_mean_m",
+    "validation_main_culm_max_target_blade_length_mean_m",
+    "validation_main_culm_max_blade_width_mean_m",
+    "validation_main_culm_max_target_blade_width_mean_m",
     "validation_tiller_leaf_ratio_mean",
     "validation_tiller_leaf_ratio_min",
     "validation_tiller_leaf_ratio_max",
@@ -61,6 +72,8 @@ TARGET_COLUMNS = (
     "validation_tiller_height_ratio_max",
     "length_mean_scale",
     "length_deviation_scale",
+    "leaf_length_mean_scale",
+    "leaf_length_deviation_scale",
     "descriptor_asset_path",
     "success",
     "failed_metrics",
@@ -85,6 +98,8 @@ class Knobs:
     leaf_std: float
     length_mean_scale: float
     length_deviation_scale: float
+    leaf_length_mean_scale: float
+    leaf_length_deviation_scale: float
     tiller_leaf_count_ratio: float = 0.90
     tiller_height_ratio: float = 0.90
 
@@ -252,24 +267,72 @@ def seed_base(rng: random.Random) -> int:
 def summarize_records(records: list[object], expected_count: int) -> dict[str, float | int]:
     heights = [float(record.height_m) for record in records]
     leaves = [float(record.main_culm_leaf_count) for record in records]
+    expanded_leaves = [
+        float(getattr(record, "main_culm_expanded_leaf_count", record.main_culm_leaf_count)) for record in records
+    ]
     live_leaves = [float(record.live_leaf_count) for record in records]
     leaf_areas = [float(record.leaf_area) for record in records]
     stem_areas = [float(record.stem_area) for record in records]
     geometry_count = sum(1 for record in records if bool(record.has_geometry))
     tiller_axes = [axis for record in records for axis in record.axes if int(axis.axis_id) != 0]
+    main_axes = [axis for record in records for axis in record.axes if int(axis.axis_id) == 0]
     tiller_leaf_ratios = [float(axis.leaf_ratio_to_main) for axis in tiller_axes]
     tiller_height_ratios = [float(axis.height_ratio_to_main) for axis in tiller_axes]
+    main_culm_departures = [float(getattr(axis, "culm_departure_degrees", 0.0)) for axis in main_axes]
+    tiller_culm_departures = [float(getattr(axis, "culm_departure_degrees", 0.0)) for axis in tiller_axes]
+    tiller_origin_heights = [float(getattr(axis, "origin_height_m", 0.0)) for axis in tiller_axes]
+    tiller_expanded_leaf_ratios = [
+        float(getattr(axis, "expanded_leaf_count", getattr(axis, "leaf_count", 0)))
+        / float(getattr(record, "main_culm_expanded_leaf_count", record.main_culm_leaf_count))
+        for record in records
+        if int(getattr(record, "main_culm_expanded_leaf_count", record.main_culm_leaf_count)) > 0
+        for axis in record.axes
+        if int(axis.axis_id) != 0
+    ]
     tiller_counts = [int(record.primary_tiller_count) for record in records]
+    culm_tip_height_ratios = [float(record.main_culm_tip_height_ratio) for record in records]
+    mature_collar_height_ratios = [float(record.main_culm_mature_collar_height_ratio) for record in records]
+    max_blade_lengths = [float(record.main_culm_max_blade_length_m) for record in records]
+    max_target_blade_lengths = [float(record.main_culm_max_target_blade_length_m) for record in records]
+    max_blade_widths = [float(record.main_culm_max_blade_width_m) for record in records]
+    max_target_blade_widths = [float(record.main_culm_max_target_blade_width_m) for record in records]
+    main_leaves = [
+        leaf
+        for record in records
+        for leaf in getattr(record, "leaves", [])
+        if int(leaf.axis_id) == 0 and bool(leaf.alive)
+    ]
+    gravity_deflections = [float(getattr(leaf, "gravity_tip_deflection_m", 0.0)) for leaf in main_leaves]
+    lateral_spans = [float(getattr(leaf, "centerline_lateral_span_m", 0.0)) for leaf in main_leaves]
+    arc_chord_ratios = [float(getattr(leaf, "centerline_arc_to_chord_ratio", 1.0)) for leaf in main_leaves]
+    waviness_rms = [float(getattr(leaf, "surface_waviness_rms_m", 0.0)) for leaf in main_leaves]
     return {
         "sample_count": len(records),
         "expected_sample_count": expected_count,
         "geometry_count": geometry_count,
         "leaf_mean": fmean(leaves) if leaves else 0.0,
         "leaf_std": population_std(leaves),
+        "expanded_leaf_mean": fmean(expanded_leaves) if expanded_leaves else 0.0,
         "live_leaf_mean": fmean(live_leaves) if live_leaves else 0.0,
         "live_leaf_std": population_std(live_leaves),
         "height_mean_m": fmean(heights) if heights else 0.0,
         "height_std_m": population_std(heights),
+        "main_culm_tip_height_ratio_mean": fmean(culm_tip_height_ratios) if culm_tip_height_ratios else 0.0,
+        "main_culm_mature_collar_height_ratio_mean": (
+            fmean(mature_collar_height_ratios) if mature_collar_height_ratios else 0.0
+        ),
+        "main_culm_max_blade_length_mean_m": fmean(max_blade_lengths) if max_blade_lengths else 0.0,
+        "main_culm_max_target_blade_length_mean_m": (
+            fmean(max_target_blade_lengths) if max_target_blade_lengths else 0.0
+        ),
+        "main_culm_max_blade_width_mean_m": fmean(max_blade_widths) if max_blade_widths else 0.0,
+        "main_culm_max_target_blade_width_mean_m": (
+            fmean(max_target_blade_widths) if max_target_blade_widths else 0.0
+        ),
+        "main_culm_gravity_tip_deflection_mean_m": fmean(gravity_deflections) if gravity_deflections else 0.0,
+        "main_culm_centerline_lateral_span_mean_m": fmean(lateral_spans) if lateral_spans else 0.0,
+        "main_culm_centerline_arc_to_chord_mean": fmean(arc_chord_ratios) if arc_chord_ratios else 1.0,
+        "main_culm_surface_waviness_rms_mean_m": fmean(waviness_rms) if waviness_rms else 0.0,
         "leaf_area_mean_m2": fmean(leaf_areas) if leaf_areas else 0.0,
         "stem_area_mean_m2": fmean(stem_areas) if stem_areas else 0.0,
         "tiller_count_mean": fmean(tiller_counts) if tiller_counts else 0.0,
@@ -278,9 +341,16 @@ def summarize_records(records: list[object], expected_count: int) -> dict[str, f
         "tiller_leaf_ratio_mean": fmean(tiller_leaf_ratios) if tiller_leaf_ratios else 0.0,
         "tiller_leaf_ratio_min": min(tiller_leaf_ratios, default=0.0),
         "tiller_leaf_ratio_max": max(tiller_leaf_ratios, default=0.0),
+        "tiller_expanded_leaf_ratio_mean": (
+            fmean(tiller_expanded_leaf_ratios) if tiller_expanded_leaf_ratios else 0.0
+        ),
         "tiller_height_ratio_mean": fmean(tiller_height_ratios) if tiller_height_ratios else 0.0,
         "tiller_height_ratio_min": min(tiller_height_ratios, default=0.0),
         "tiller_height_ratio_max": max(tiller_height_ratios, default=0.0),
+        "main_culm_departure_mean_degrees": fmean(main_culm_departures) if main_culm_departures else 0.0,
+        "tiller_culm_departure_mean_degrees": fmean(tiller_culm_departures) if tiller_culm_departures else 0.0,
+        "tiller_origin_height_mean_m": fmean(tiller_origin_heights) if tiller_origin_heights else 0.0,
+        "tiller_origin_height_max_m": max(tiller_origin_heights, default=0.0),
     }
 
 
@@ -317,11 +387,14 @@ def failed_metrics(
         failures.append("height_std_m")
     if not 0.85 <= float(metrics["tiller_leaf_ratio_mean"]) <= 0.95:
         failures.append("tiller_leaf_ratio_mean")
-    if not 0.85 <= float(metrics["tiller_height_ratio_mean"]) <= 0.95:
+    mature_tillers = target.date >= "2021-08-18"
+    if mature_tillers and not 0.85 <= float(metrics["tiller_height_ratio_mean"]) <= 0.95:
         failures.append("tiller_height_ratio_mean")
     if float(metrics["tiller_leaf_ratio_min"]) < 0.75 or float(metrics["tiller_leaf_ratio_max"]) > 1.05:
         failures.append("tiller_leaf_ratio_range")
-    if float(metrics["tiller_height_ratio_min"]) < 0.75 or float(metrics["tiller_height_ratio_max"]) > 1.05:
+    if mature_tillers and (
+        float(metrics["tiller_height_ratio_min"]) < 0.75 or float(metrics["tiller_height_ratio_max"]) > 1.05
+    ):
         failures.append("tiller_height_ratio_range")
     if int(metrics["tiller_count_min"]) < 3 or int(metrics["tiller_count_max"]) > 5:
         failures.append("tiller_count_range")
@@ -340,8 +413,10 @@ def loss_for(target: Target, metrics: dict[str, float | int], mean_tolerance: fl
     ) ** 2 + (
         errors["height_std_m"] / max(std_tolerance, 1e-6)
     ) ** 2 + ((float(metrics["tiller_leaf_ratio_mean"]) - 0.90) / 0.05) ** 2 + (
-        (float(metrics["tiller_height_ratio_mean"]) - 0.90) / 0.05
-    ) ** 2
+        ((float(metrics["tiller_height_ratio_mean"]) - 0.90) / 0.05) ** 2
+        if target.date >= "2021-08-18"
+        else 0.0
+    )
 
 
 def update_knobs(target: Target, metrics: dict[str, float | int], knobs: Knobs) -> Knobs:
@@ -362,10 +437,11 @@ def update_knobs(target: Target, metrics: dict[str, float | int], knobs: Knobs) 
         next_leaf_std = knobs.leaf_std * clamp(target.leaf_std / leaf_std, 0.70, 1.40)
 
     if height_mean <= 1e-6:
-        next_length_mean = knobs.length_mean_scale * 1.15
+        height_ratio = 1.15
     else:
-        next_length_mean = knobs.length_mean_scale * clamp(target.height_mean_m / height_mean, 0.85, 1.15)
-
+        height_ratio = clamp(target.height_mean_m / height_mean, 0.85, 1.15)
+    next_length_mean = knobs.length_mean_scale * height_ratio
+    next_leaf_length_mean = knobs.leaf_length_mean_scale * min(height_ratio, 1.0)
     if target.height_std_m <= 1e-6:
         next_length_std = knobs.length_deviation_scale * 0.75
     elif height_std <= 1e-6:
@@ -378,22 +454,31 @@ def update_knobs(target: Target, metrics: dict[str, float | int], knobs: Knobs) 
         leaf_std=clamp(finite_or(next_leaf_std, target.leaf_std), 0.0, 8.0),
         length_mean_scale=clamp(finite_or(next_length_mean, 1.0), 0.20, 3.0),
         length_deviation_scale=clamp(finite_or(next_length_std, 1.0), 0.0, 4.0),
+        leaf_length_mean_scale=clamp(finite_or(next_leaf_length_mean, 1.0), 0.05, 1.0),
+        leaf_length_deviation_scale=clamp(finite_or(next_length_std, 1.0), 0.0, 4.0),
         tiller_leaf_count_ratio=clamp(
             knobs.tiller_leaf_count_ratio * (0.90 / tiller_leaf_ratio) if tiller_leaf_ratio > 1e-6
             else knobs.tiller_leaf_count_ratio,
             0.5,
             1.1,
         ),
-        tiller_height_ratio=clamp(
-            knobs.tiller_height_ratio * (0.90 / tiller_height_ratio) if tiller_height_ratio > 1e-6
-            else knobs.tiller_height_ratio,
-            0.5,
-            1.1,
+        tiller_height_ratio=(
+            clamp(
+                knobs.tiller_height_ratio * (0.90 / tiller_height_ratio) if tiller_height_ratio > 1e-6
+                else knobs.tiller_height_ratio,
+                0.5,
+                1.1,
+            )
+            if target.date >= "2021-08-18"
+            else knobs.tiller_height_ratio
         ),
     )
 
 
 def sample_descriptor(evo: object, args: argparse.Namespace, target: Target, knobs: Knobs, count: int, seed: int) -> dict[str, float | int]:
+    stage = growth_stage(target.date)
+    reference_stage = "GrowthStage04"
+    stage_leaf_scale = LEAF_MAX_LENGTH_M[stage][target.cultivar] / LEAF_MAX_LENGTH_M[reference_stage][target.cultivar]
     records = evo.SampleSorghumLsDescriptorPhenotypes(
         target_base_descriptor(args, target),
         knobs.leaf_mean,
@@ -406,16 +491,25 @@ def sample_descriptor(evo: object, args: argparse.Namespace, target: Target, kno
         MAIN_CULM_DIAMETER_M_BY_DATE[target.date],
         knobs.tiller_leaf_count_ratio,
         knobs.tiller_height_ratio,
+        True,
+        False,
+        stage_leaf_scale * knobs.leaf_length_mean_scale,
+        stage_leaf_scale * knobs.leaf_length_deviation_scale,
+        -1.0,
+        TARGET_GDD_BY_STAGE[stage],
     )
     return summarize_records(records, count)
 
 
 def initial_knobs(target: Target) -> Knobs:
+    length_scale = clamp(target.initial_length_mean_scale, 0.20, 3.0)
     return Knobs(
         leaf_mean=target.leaf_mean,
         leaf_std=target.leaf_std,
-        length_mean_scale=clamp(target.initial_length_mean_scale, 0.20, 3.0),
+        length_mean_scale=length_scale,
         length_deviation_scale=1.0,
+        leaf_length_mean_scale=1.0,
+        leaf_length_deviation_scale=1.0,
         tiller_leaf_count_ratio=0.90,
         tiller_height_ratio=0.90,
     )
@@ -484,7 +578,7 @@ def calibrate_target(args: argparse.Namespace, target: Target) -> dict[str, obje
 
         validation_rounds: list[dict[str, object]] = []
         validation_seed = seed_base(rng)
-        for validation_round in range(6):
+        for validation_round in range(12):
             validation_metrics = sample_descriptor(
                 evo,
                 args,
@@ -520,12 +614,23 @@ def calibrate_target(args: argparse.Namespace, target: Target) -> dict[str, obje
             MAIN_CULM_DIAMETER_M_BY_DATE[target.date],
             best_knobs.tiller_leaf_count_ratio,
             best_knobs.tiller_height_ratio,
+            LEAF_MAX_LENGTH_M[growth_stage(target.date)][target.cultivar]
+            / LEAF_MAX_LENGTH_M["GrowthStage04"][target.cultivar]
+            * best_knobs.leaf_length_mean_scale,
+            LEAF_MAX_LENGTH_M[growth_stage(target.date)][target.cultivar]
+            / LEAF_MAX_LENGTH_M["GrowthStage04"][target.cultivar]
+            * best_knobs.leaf_length_deviation_scale,
+            TARGET_GDD_BY_STAGE[growth_stage(target.date)],
         )
         if not saved:
             raise RuntimeError(f"failed to save descriptor: {output_descriptor_path}")
         migrate_fidelity_v4(
             project_assets_root(args.project) / output_descriptor_path,
             FIDELITY_STAGE_VALUES[growth_stage(target.date)],
+            growth_stage(target.date),
+            finalize_snapshot=True,
+            leaf_length_mean_scale=best_knobs.leaf_length_mean_scale,
+            leaf_length_deviation_scale=best_knobs.leaf_length_deviation_scale,
         )
         return {
             "schema_version": 1,
@@ -572,6 +677,18 @@ def report_to_row(report: dict[str, object]) -> dict[str, object]:
         "validation_leaf_std": metrics["leaf_std"],
         "validation_height_mean_m": metrics["height_mean_m"],
         "validation_height_std_m": metrics["height_std_m"],
+        "validation_main_culm_tip_height_ratio_mean": metrics["main_culm_tip_height_ratio_mean"],
+        "validation_main_culm_mature_collar_height_ratio_mean": metrics[
+            "main_culm_mature_collar_height_ratio_mean"
+        ],
+        "validation_main_culm_max_blade_length_mean_m": metrics["main_culm_max_blade_length_mean_m"],
+        "validation_main_culm_max_target_blade_length_mean_m": metrics[
+            "main_culm_max_target_blade_length_mean_m"
+        ],
+        "validation_main_culm_max_blade_width_mean_m": metrics["main_culm_max_blade_width_mean_m"],
+        "validation_main_culm_max_target_blade_width_mean_m": metrics[
+            "main_culm_max_target_blade_width_mean_m"
+        ],
         "validation_tiller_leaf_ratio_mean": metrics["tiller_leaf_ratio_mean"],
         "validation_tiller_leaf_ratio_min": metrics["tiller_leaf_ratio_min"],
         "validation_tiller_leaf_ratio_max": metrics["tiller_leaf_ratio_max"],
@@ -580,6 +697,8 @@ def report_to_row(report: dict[str, object]) -> dict[str, object]:
         "validation_tiller_height_ratio_max": metrics["tiller_height_ratio_max"],
         "length_mean_scale": knobs["length_mean_scale"],
         "length_deviation_scale": knobs["length_deviation_scale"],
+        "leaf_length_mean_scale": knobs["leaf_length_mean_scale"],
+        "leaf_length_deviation_scale": knobs["leaf_length_deviation_scale"],
         "descriptor_asset_path": report["descriptor_asset_path"],
         "success": report["success"],
         "failed_metrics": ";".join(validation["failed_metrics"]),
@@ -617,10 +736,15 @@ This folder is produced by `PythonBinding/sorghum_lsystem_calibrate_date_cultiva
 - Acceptance: means within {args.mean_tolerance:.1%}, stds within {args.std_tolerance:.1%}
 - Failed descriptors: {len(failures)}
 
-The script changes descriptor knobs: total phytomer count mean/deviation, a shared length mean scale,
-a shared length deviation scale for internode, leaf blade, leaf sheath, and leaf neck distributions,
-the date-specific absolute leaf widths and main-culm diameters, and v4 tiller leaf/height ratios.
-It does not generate scene assets or tune target GDD.
+The script changes descriptor knobs: total phytomer count mean/deviation, internode length
+mean/deviation scales, the date-specific absolute leaf dimensions and main-culm diameters, and v4
+tiller leaf/height ratios. Internode length solves upward height corrections. Blade length may shorten
+only when an upright blade otherwise exceeds an early whole-plant height target; it never grows beyond
+the authored date/cultivar profile. Calibration samples the same blade-length profile that is
+serialized, so validation describes the final descriptor rather than the mature manual template.
+The five measured-date descriptors are finalized snapshots at their date-specific target GDD; the
+underlying L-system remains time-resolved when snapshot finalization is disabled. This script does
+not generate scene assets.
 """
     path.write_text(text, encoding="utf-8")
 
@@ -705,11 +829,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=repo_root)
     parser.add_argument("--build-dir", type=Path, default=repo_root / "out" / "build" / "vs2026-x64")
-    parser.add_argument("--config", default="RelWithDebInfo")
+    parser.add_argument("--config", default="Release")
     parser.add_argument(
         "--runtime-package-dir",
         type=Path,
-        default=repo_root / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "RelWithDebInfo" / "Packages",
+        default=repo_root / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "Release" / "Packages",
     )
     parser.add_argument(
         "--project",

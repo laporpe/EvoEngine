@@ -37,8 +37,8 @@ class SorghumGrowthModel : public LSystemGrowthModelBase<SorghumGrowthModel, Sor
   /// Reset all base + plant-specific state to uninitialized.
   void Reset();
 
-  /// Complete and mature the already-budgeted axes for an authored descriptor
-  /// snapshot. Interactive preview growth remains time-resolved.
+  /// Complete already-budgeted axes and organ dimensions for an authored
+  /// snapshot while preserving thermal-age-resolved leaf bending.
   void FinalizeSnapshotMorphology();
 
   // ===== CRTP hooks invoked by LSystemGrowthModelBase =====

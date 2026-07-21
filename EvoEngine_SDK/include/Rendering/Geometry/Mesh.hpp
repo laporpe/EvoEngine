@@ -138,6 +138,8 @@ class Mesh final : public IAsset, public IGeometry {
   std::vector<glm::uvec3> triangles_; /**< The triangles of the mesh. */
 
   VertexAttributes vertex_attributes_ = {}; /**< The vertex attributes of the mesh. */
+  bool render_geometry_allocated_ = false;
+  bool render_geometry_current_ = false;
   friend class RenderLayer;
   friend class RenderInstanceStorage;
   friend class TopLevelAccelerationStructure;
@@ -211,9 +213,10 @@ class Mesh final : public IAsset, public IGeometry {
    * @param vertex_attributes The attributes for the vertices.
    * @param vertices A vector containing the vertices.
    * @param triangles A vector containing the triangle indices.
+   * @param update_render_geometry Whether to publish the mesh to Vulkan render storage.
    */
   void SetVertices(const VertexAttributes& vertex_attributes, const std::vector<Vertex>& vertices,
-                   const std::vector<glm::uvec3>& triangles);
+                   const std::vector<glm::uvec3>& triangles, bool update_render_geometry = true);
 
   /**
    * @brief Merges duplicate vertices in the mesh.

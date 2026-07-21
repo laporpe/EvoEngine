@@ -168,7 +168,8 @@ void GenerateUnitCylinderMesh(std::vector<Vertex>& vertices, std::vector<unsigne
 }
 
 void GenerateContinuousCulmMesh(const SorghumGraph& graph, const SorghumLSDescriptor* descriptor,
-                                std::vector<Vertex>& vertices, std::vector<glm::uvec3>& triangles) {
+                                std::vector<Vertex>& vertices, std::vector<glm::uvec3>& triangles,
+                                std::vector<SorghumOrganGeometryRange>& organ_ranges) {
   vertices.clear();
   triangles.clear();
   std::map<int, std::vector<LNodeHandle>> axes;
@@ -183,6 +184,8 @@ void GenerateContinuousCulmMesh(const SorghumGraph& graph, const SorghumLSDescri
   const float node_scale = descriptor ? descriptor->culm_node_radius_scale : 1.08f;
   const float repeat_m = descriptor ? descriptor->culm_texture_repeat_m : 0.25f;
   for (auto& [axis_id, handles] : axes) {
+    const uint32_t range_vertex_start = static_cast<uint32_t>(vertices.size());
+    const uint32_t range_triangle_start = static_cast<uint32_t>(triangles.size());
     std::sort(handles.begin(), handles.end(), [&](const auto a, const auto b) {
       return graph.PeekNode(a).data.Get<SorghumInternode>().rank < graph.PeekNode(b).data.Get<SorghumInternode>().rank;
     });
@@ -291,6 +294,14 @@ void GenerateContinuousCulmMesh(const SorghumGraph& graph, const SorghumLSDescri
           triangles.emplace_back(center_index, a, b);
       }
     }
+    SorghumOrganGeometryRange range;
+    range.kind = SorghumOrganGeometryKind::Culm;
+    range.axis_id = axis_id;
+    range.vertex_offset = range_vertex_start;
+    range.vertex_count = static_cast<uint32_t>(vertices.size()) - range_vertex_start;
+    range.triangle_offset = range_triangle_start;
+    range.triangle_count = static_cast<uint32_t>(triangles.size()) - range_triangle_start;
+    organ_ranges.emplace_back(range);
   }
 }
 
@@ -393,12 +404,38 @@ void SorghumLS::ClearGeometryEntities() const {
   for (const auto& child : children) {
     scene->DeleteEntity(child);
   }
+  geometry_snapshot_.reset();
 }
 
-void SorghumLS::GenerateGeometryEntities(const bool uncapped_growth) {
-  ClearGeometryEntities();
+const std::shared_ptr<const SorghumGeometrySnapshot>& SorghumLS::GetGeometrySnapshot() const {
+  return geometry_snapshot_;
+}
+
+void SorghumLS::GenerateGeometryEntities(const bool uncapped_growth, const bool reuse_geometry_entities) {
+  if (!reuse_geometry_entities) {
+    ClearGeometryEntities();
+  }
   growth_model.Reset();
   GrowToTargetGDD(uncapped_growth);
+}
+
+std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::GenerateGeometrySnapshot(const bool uncapped_growth,
+                                                                                   const uint32_t max_growth_steps) {
+  growth_model.Reset();
+  const double grow_start = GetApplication().GetTimes().Now();
+  const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
+  if (!descriptor) {
+    last_grow_seconds = 0.0;
+    return {};
+  }
+
+  growth_model.Initialize(*descriptor, seed);
+  growth_model.GrowToGDD(target_gdd, uncapped_growth ? 0u : max_growth_steps);
+  if (descriptor->finalize_snapshot_morphology) {
+    growth_model.FinalizeSnapshotMorphology();
+  }
+  last_grow_seconds = GetApplication().GetTimes().Now() - grow_start;
+  return BuildGeometrySnapshot();
 }
 
 void SorghumLS::GeneratePreviewGeometryEntities(const float preview_target_gdd,
@@ -449,7 +486,9 @@ void SorghumLS::GrowToTargetGDD(const bool uncapped_growth, const uint32_t max_g
   }
 
   growth_model.GrowToGDD(target_gdd, uncapped_growth ? 0u : max_growth_steps);
-  growth_model.FinalizeSnapshotMorphology();
+  if (descriptor->finalize_snapshot_morphology) {
+    growth_model.FinalizeSnapshotMorphology();
+  }
   last_grow_seconds = GetApplication().GetTimes().Now() - grow_start;
 
   const bool no_growth_step = !reinitialized && growth_model.last_growth_steps == 0;
@@ -489,7 +528,7 @@ bool SorghumLS::AdvanceChronologicalAging(const float delta_years) {
   return changed;
 }
 
-void SorghumLS::RebuildGeometry() {
+std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::BuildGeometrySnapshot() {
   auto& times = GetApplication().GetTimes();
   const double rebuild_start = times.Now();
   last_invalid_instance_count = 0;
@@ -504,7 +543,7 @@ void SorghumLS::RebuildGeometry() {
 
   if (!growth_model.IsInitialized()) {
     last_rebuild_seconds = 0.0;
-    return;
+    return {};
   }
 
   const auto scene = GetScene();
@@ -512,6 +551,21 @@ void SorghumLS::RebuildGeometry() {
   const auto color_mode = GetGlobalColorMode();
   const glm::vec4 instance_color = HashToColor(owner.GetIndex());
   const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
+  auto snapshot = std::make_shared<SorghumGeometrySnapshot>();
+  snapshot->geometry_version = ++geometry_version_;
+  snapshot->seed = seed;
+  snapshot->target_gdd = target_gdd;
+  if (geometry_snapshot_) {
+    snapshot->internode_instances.reserve(geometry_snapshot_->internode_instances.size());
+    snapshot->culm_vertices.reserve(geometry_snapshot_->culm_vertices.size());
+    snapshot->culm_triangles.reserve(geometry_snapshot_->culm_triangles.size());
+    snapshot->leaf_vertices.reserve(geometry_snapshot_->leaf_vertices.size());
+    snapshot->leaf_triangles.reserve(geometry_snapshot_->leaf_triangles.size());
+    snapshot->organ_ranges.reserve(geometry_snapshot_->organ_ranges.size());
+  }
+  auto current_leaf_mesh_settings = leaf_mesh_settings;
+  current_leaf_mesh_settings.gravity_local_m_s2 =
+      glm::conjugate(scene->GetDataComponent<GlobalTransform>(owner).GetRotation()) * glm::vec3(0.0f, -9.80665f, 0.0f);
   SorghumLeafAtlasLayout base_leaf_atlas_layout;
   if (descriptor) {
     base_leaf_atlas_layout.variant_columns = descriptor->leaf_atlas_variant_columns;
@@ -523,25 +577,12 @@ void SorghumLS::RebuildGeometry() {
   }
   base_leaf_atlas_layout = NormalizeSorghumLeafAtlasLayout(base_leaf_atlas_layout);
 
-  Entity internode_entity;
-  Entity leaf_entity;
-  for (const auto& child : scene->GetChildren(owner)) {
-    const auto name = scene->GetEntityName(child);
-    if (name == "Sorghum Internodes") {
-      internode_entity = child;
-    } else if (name == "Sorghum Leaves") {
-      leaf_entity = child;
-    }
-  }
-
   // -------------------------------------------------------------------------
   // Internodes as instanced cylinders via Particles.
   // -------------------------------------------------------------------------
   {
     const double internode_start = times.Now();
-    static thread_local std::vector<ParticleInfo> internode_infos_cache;
-    auto& infos = internode_infos_cache;
-    infos.clear();
+    auto& infos = snapshot->internode_instances;
 
     const auto& sorted = growth_model.graph.PeekSortedNodeList();
     last_node_count = static_cast<uint32_t>(sorted.size());
@@ -591,72 +632,24 @@ void SorghumLS::RebuildGeometry() {
 
       pi.instance_matrix.value = model;
       pi.instance_color = EvaluateInternodeGreenPalette(internode.rank, max_internode_rank, internode.order);
+      const uint32_t instance_offset = static_cast<uint32_t>(infos.size());
       infos.push_back(pi);
+      SorghumOrganGeometryRange range;
+      range.kind = SorghumOrganGeometryKind::InternodeInstance;
+      range.axis_id = internode.axis_id;
+      range.rank = internode.rank;
+      range.node_id = static_cast<int>(node.GetIndex());
+      range.instance_offset = instance_offset;
+      range.instance_count = 1;
+      snapshot->organ_ranges.emplace_back(range);
     }
 
     last_internode_count = static_cast<uint32_t>(infos.size());
 
-    if (!scene->IsEntityValid(internode_entity)) {
-      internode_entity = scene->CreateEntity("Sorghum Internodes");
-      scene->SetParent(internode_entity, owner);
-    }
-    scene->SetEntitySerializable(internode_entity, false);
-
-    const auto particles = scene->GetOrSetPrivateComponent<Particles>(internode_entity).lock();
-    if (!particles->mesh.Get<Mesh>()) {
-      auto mesh = AssetManager::CreateTemporaryAsset<Mesh>();
-      std::vector<Vertex> cyl_verts;
-      std::vector<unsigned int> cyl_indices;
-      GenerateUnitCylinderMesh(cyl_verts, cyl_indices, 12);
-      VertexAttributes attrs{};
-      attrs.normal = true;
-      attrs.tangent = true;
-      attrs.tex_coord = true;
-      attrs.color = true;
-      mesh->SetVertices(attrs, cyl_verts, cyl_indices);
-      particles->mesh = mesh;
-    }
-    if (!particles->material.Get<Material>()) {
-      particles->material = AssetManager::CreateTemporaryAsset<Material>();
-    }
-    if (const auto material = particles->material.Get<Material>()) {
-      const auto albedo = descriptor ? descriptor->stem_albedo_texture.Get<Texture2D>() : nullptr;
-      material->SetAlbedoTexture(albedo);
-      material->SetNormalTexture(descriptor ? descriptor->stem_normal_texture.Get<Texture2D>() : nullptr);
-      material->SetRoughnessTexture(descriptor ? descriptor->stem_roughness_texture.Get<Texture2D>() : nullptr);
-      material->SetMetallicTexture(descriptor ? descriptor->stem_metallic_texture.Get<Texture2D>() : nullptr);
-      material->SetAoTexture(descriptor ? descriptor->stem_ao_texture.Get<Texture2D>() : nullptr);
-      material->vertex_color_only = false;
-      material->material_properties.albedo_color =
-          albedo || !descriptor ? glm::vec3(1.0f) : descriptor->stem_material_albedo_color;
-      material->material_properties.roughness = descriptor ? descriptor->stem_material_roughness : 0.74f;
-      material->material_properties.metallic = descriptor ? descriptor->stem_material_metallic : 0.0f;
-      material->material_properties.specular = descriptor ? descriptor->stem_material_specular : 0.4f;
-      material->material_properties.emission = 0.0f;
-    }
-
-    auto info_list = particles->particle_info_list.Get<ParticleInfoList>();
-    if (!info_list) {
-      particles->particle_info_list = info_list = AssetManager::CreateTemporaryAsset<ParticleInfoList>();
-    }
-    info_list->SetParticleInfos({});
-
-    static thread_local std::vector<Vertex> culm_vertices;
-    static thread_local std::vector<glm::uvec3> culm_triangles;
-    GenerateContinuousCulmMesh(growth_model.graph, descriptor.get(), culm_vertices, culm_triangles);
-    const auto culm_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(internode_entity).lock();
-    if (!culm_renderer->mesh.Get<Mesh>()) {
-      culm_renderer->mesh = AssetManager::CreateTemporaryAsset<Mesh>();
-    }
-    if (const auto mesh = culm_renderer->mesh.Get<Mesh>()) {
-      VertexAttributes attributes{};
-      attributes.normal = true;
-      attributes.tangent = true;
-      attributes.tex_coord = true;
-      attributes.color = true;
-      mesh->SetVertices(attributes, culm_vertices, culm_triangles);
-    }
-    culm_renderer->material = particles->material;
+    auto& culm_vertices = snapshot->culm_vertices;
+    auto& culm_triangles = snapshot->culm_triangles;
+    GenerateContinuousCulmMesh(growth_model.graph, descriptor.get(), culm_vertices, culm_triangles,
+                               snapshot->organ_ranges);
     last_rebuild_internode_seconds = times.Now() - internode_start;
   }
 
@@ -664,12 +657,8 @@ void SorghumLS::RebuildGeometry() {
   // Leaves as one procedural mesh (all live leaves aggregated).
   // -------------------------------------------------------------------------
   {
-    static thread_local std::vector<Vertex> leaf_vertices_cache;
-    static thread_local std::vector<glm::uvec3> leaf_indices_cache;
-    auto& leaf_vertices = leaf_vertices_cache;
-    auto& leaf_indices = leaf_indices_cache;
-    leaf_vertices.clear();
-    leaf_indices.clear();
+    auto& leaf_vertices = snapshot->leaf_vertices;
+    auto& leaf_indices = snapshot->leaf_triangles;
     leaf_vertices.reserve(16384);
     leaf_indices.reserve(16384);
     static thread_local StemContext stem_ctx;
@@ -694,11 +683,12 @@ void SorghumLS::RebuildGeometry() {
       }
 
       const double spline_start = times.Now();
-      BuildLeafSplineFromState(leaf, stem_ctx, growth_model.sampled, leaf_mesh_settings, leaf_spline);
+      BuildLeafSplineFromState(leaf, stem_ctx, growth_model.sampled, current_leaf_mesh_settings, leaf_spline);
       last_leaf_spline_seconds += times.Now() - spline_start;
 
       const double mesh_start = times.Now();
       const size_t vertex_start = leaf_vertices.size();
+      const size_t triangle_start = leaf_indices.size();
       auto leaf_atlas_layout = base_leaf_atlas_layout;
       leaf_atlas_layout.variant_index = ComputeSorghumLeafAtlasVariant(
           seed, static_cast<uint32_t>(node.GetIndex()), leaf.node_random, leaf_atlas_layout.variant_count);
@@ -722,66 +712,175 @@ void SorghumLS::RebuildGeometry() {
           leaf_vertices[i].color = override_color;
         }
       }
+      SorghumOrganGeometryRange range;
+      range.kind = SorghumOrganGeometryKind::Leaf;
+      range.axis_id = leaf.axis_id;
+      range.rank = leaf.rank;
+      range.node_id = static_cast<int>(node.GetIndex());
+      range.vertex_offset = static_cast<uint32_t>(vertex_start);
+      range.vertex_count = static_cast<uint32_t>(leaf_vertices.size() - vertex_start);
+      range.triangle_offset = static_cast<uint32_t>(triangle_start);
+      range.triangle_count = static_cast<uint32_t>(leaf_indices.size() - triangle_start);
+      snapshot->organ_ranges.emplace_back(range);
       last_leaf_mesh_seconds += times.Now() - mesh_start;
-    }
-
-    if (!scene->IsEntityValid(leaf_entity)) {
-      leaf_entity = scene->CreateEntity("Sorghum Leaves");
-      scene->SetParent(leaf_entity, owner);
-    }
-    scene->SetEntitySerializable(leaf_entity, false);
-
-    const auto mesh_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(leaf_entity).lock();
-    if (!mesh_renderer->mesh.Get<Mesh>()) {
-      mesh_renderer->mesh = AssetManager::CreateTemporaryAsset<Mesh>();
-    }
-    if (!mesh_renderer->material.Get<Material>()) {
-      mesh_renderer->material = AssetManager::CreateTemporaryAsset<Material>();
-    }
-
-    if (const auto material = mesh_renderer->material.Get<Material>()) {
-      const auto albedo = descriptor ? descriptor->leaf_atlas_albedo_texture.Get<Texture2D>() : nullptr;
-      if (albedo) {
-        material->vertex_color_only = false;
-        material->SetAlbedoTexture(albedo);
-        material->SetNormalTexture(descriptor->leaf_atlas_normal_texture.Get<Texture2D>());
-        material->SetRoughnessTexture(descriptor->leaf_atlas_roughness_texture.Get<Texture2D>());
-        material->SetMetallicTexture(descriptor->leaf_atlas_metallic_texture.Get<Texture2D>());
-        material->SetAoTexture(descriptor->leaf_atlas_ao_texture.Get<Texture2D>());
-        material->material_properties.albedo_color = glm::vec3(1.0f);
-      } else {
-        material->SetAlbedoTexture(nullptr);
-        material->SetNormalTexture(nullptr);
-        material->SetRoughnessTexture(nullptr);
-        material->SetMetallicTexture(nullptr);
-        material->SetAoTexture(nullptr);
-        material->vertex_color_only = false;
-        material->material_properties.albedo_color =
-            descriptor ? descriptor->leaf_material_albedo_color : glm::vec3(0.26f, 0.52f, 0.18f);
-      }
-      material->material_properties.metallic = descriptor ? descriptor->leaf_material_metallic : 0.0f;
-      material->material_properties.roughness = descriptor ? descriptor->leaf_material_roughness : 0.72f;
-      material->material_properties.specular = descriptor ? descriptor->leaf_material_specular : 0.45f;
-      material->material_properties.emission = 0.0f;
-    }
-
-    const auto mesh = mesh_renderer->mesh.Get<Mesh>();
-    if (!leaf_vertices.empty() && !leaf_indices.empty()) {
-      const double upload_start = times.Now();
-      mesh->ray_tracing_acceleration_enabled = false;
-      mesh->compact_storage_on_update = false;
-      mesh->optimize_meshlet_layout = false;
-      VertexAttributes attributes{};
-      attributes.normal = true;
-      attributes.tangent = true;
-      attributes.color = true;
-      attributes.tex_coord = true;
-      mesh->SetVertices(attributes, leaf_vertices, leaf_indices);
-      last_mesh_upload_seconds = times.Now() - upload_start;
     }
   }
 
+  snapshot->node_count = last_node_count;
+  snapshot->internode_count = last_internode_count;
+  snapshot->leaf_count = last_leaf_count;
+  snapshot->live_leaf_count = last_live_leaf_count;
+  snapshot->invalid_instance_count = last_invalid_instance_count;
   last_rebuild_seconds = times.Now() - rebuild_start;
+  return snapshot;
+}
+
+void SorghumLS::PublishGeometrySnapshot(const std::shared_ptr<const SorghumGeometrySnapshot>& snapshot,
+                                        const bool update_render_geometry) {
+  if (!snapshot) {
+    return;
+  }
+  auto& times = GetApplication().GetTimes();
+  const double publish_start = times.Now();
+  const auto scene = GetScene();
+  const auto owner = GetOwner();
+  const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
+
+  Entity internode_entity;
+  Entity leaf_entity;
+  for (const auto& child : scene->GetChildren(owner)) {
+    const auto name = scene->GetEntityName(child);
+    if (name == "Sorghum Internodes") {
+      internode_entity = child;
+    } else if (name == "Sorghum Leaves") {
+      leaf_entity = child;
+    }
+  }
+
+  if (!scene->IsEntityValid(internode_entity)) {
+    internode_entity = scene->CreateEntity("Sorghum Internodes");
+    scene->SetParent(internode_entity, owner);
+  }
+  scene->SetEntitySerializable(internode_entity, false);
+
+  const auto particles = scene->GetOrSetPrivateComponent<Particles>(internode_entity).lock();
+  if (!particles->mesh.Get<Mesh>()) {
+    auto mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+    std::vector<Vertex> cylinder_vertices;
+    std::vector<unsigned int> cylinder_indices;
+    GenerateUnitCylinderMesh(cylinder_vertices, cylinder_indices, 12);
+    VertexAttributes attributes{};
+    attributes.normal = true;
+    attributes.tangent = true;
+    attributes.tex_coord = true;
+    attributes.color = true;
+    mesh->SetVertices(attributes, cylinder_vertices, cylinder_indices);
+    particles->mesh = mesh;
+  }
+  if (!particles->material.Get<Material>()) {
+    particles->material = AssetManager::CreateTemporaryAsset<Material>();
+  }
+  if (const auto material = particles->material.Get<Material>()) {
+    const auto albedo = descriptor ? descriptor->stem_albedo_texture.Get<Texture2D>() : nullptr;
+    material->SetAlbedoTexture(albedo);
+    material->SetNormalTexture(descriptor ? descriptor->stem_normal_texture.Get<Texture2D>() : nullptr);
+    material->SetRoughnessTexture(descriptor ? descriptor->stem_roughness_texture.Get<Texture2D>() : nullptr);
+    material->SetMetallicTexture(descriptor ? descriptor->stem_metallic_texture.Get<Texture2D>() : nullptr);
+    material->SetAoTexture(descriptor ? descriptor->stem_ao_texture.Get<Texture2D>() : nullptr);
+    material->vertex_color_only = false;
+    material->material_properties.albedo_color =
+        albedo || !descriptor ? glm::vec3(1.0f) : descriptor->stem_material_albedo_color;
+    material->material_properties.roughness = descriptor ? descriptor->stem_material_roughness : 0.74f;
+    material->material_properties.metallic = descriptor ? descriptor->stem_material_metallic : 0.0f;
+    material->material_properties.specular = descriptor ? descriptor->stem_material_specular : 0.4f;
+    material->material_properties.emission = 0.0f;
+  }
+
+  auto particle_info_list = particles->particle_info_list.Get<ParticleInfoList>();
+  if (!particle_info_list) {
+    particles->particle_info_list = particle_info_list = AssetManager::CreateTemporaryAsset<ParticleInfoList>();
+  }
+  particle_info_list->SetParticleInfos({});
+
+  const auto culm_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(internode_entity).lock();
+  if (!culm_renderer->mesh.Get<Mesh>()) {
+    culm_renderer->mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+  }
+  if (const auto mesh = culm_renderer->mesh.Get<Mesh>()) {
+    mesh->compact_storage_on_update = false;
+    mesh->optimize_meshlet_layout = false;
+    VertexAttributes attributes{};
+    attributes.normal = true;
+    attributes.tangent = true;
+    attributes.tex_coord = true;
+    attributes.color = true;
+    mesh->SetVertices(attributes, snapshot->culm_vertices, snapshot->culm_triangles, update_render_geometry);
+  }
+  culm_renderer->material = particles->material;
+
+  if (!scene->IsEntityValid(leaf_entity)) {
+    leaf_entity = scene->CreateEntity("Sorghum Leaves");
+    scene->SetParent(leaf_entity, owner);
+  }
+  scene->SetEntitySerializable(leaf_entity, false);
+
+  const auto leaf_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(leaf_entity).lock();
+  if (!leaf_renderer->mesh.Get<Mesh>()) {
+    leaf_renderer->mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+  }
+  if (!leaf_renderer->material.Get<Material>()) {
+    leaf_renderer->material = AssetManager::CreateTemporaryAsset<Material>();
+  }
+  if (const auto material = leaf_renderer->material.Get<Material>()) {
+    const auto albedo = descriptor ? descriptor->leaf_atlas_albedo_texture.Get<Texture2D>() : nullptr;
+    if (albedo) {
+      material->vertex_color_only = false;
+      material->SetAlbedoTexture(albedo);
+      material->SetNormalTexture(descriptor->leaf_atlas_normal_texture.Get<Texture2D>());
+      material->SetRoughnessTexture(descriptor->leaf_atlas_roughness_texture.Get<Texture2D>());
+      material->SetMetallicTexture(descriptor->leaf_atlas_metallic_texture.Get<Texture2D>());
+      material->SetAoTexture(descriptor->leaf_atlas_ao_texture.Get<Texture2D>());
+      material->material_properties.albedo_color = glm::vec3(1.0f);
+    } else {
+      material->SetAlbedoTexture(nullptr);
+      material->SetNormalTexture(nullptr);
+      material->SetRoughnessTexture(nullptr);
+      material->SetMetallicTexture(nullptr);
+      material->SetAoTexture(nullptr);
+      material->vertex_color_only = false;
+      material->material_properties.albedo_color =
+          descriptor ? descriptor->leaf_material_albedo_color : glm::vec3(0.26f, 0.52f, 0.18f);
+    }
+    material->material_properties.metallic = descriptor ? descriptor->leaf_material_metallic : 0.0f;
+    material->material_properties.roughness = descriptor ? descriptor->leaf_material_roughness : 0.72f;
+    material->material_properties.specular = descriptor ? descriptor->leaf_material_specular : 0.45f;
+    material->material_properties.subsurface_factor = descriptor ? descriptor->leaf_material_subsurface_factor : 0.0f;
+    material->material_properties.subsurface_color =
+        descriptor ? descriptor->leaf_material_subsurface_color : glm::vec3(0.26f, 0.52f, 0.18f);
+    material->material_properties.subsurface_radius =
+        descriptor ? descriptor->leaf_material_subsurface_radius : glm::vec3(0.001f);
+    material->material_properties.emission = 0.0f;
+  }
+
+  const auto leaf_mesh = leaf_renderer->mesh.Get<Mesh>();
+  const double upload_start = times.Now();
+  leaf_mesh->ray_tracing_acceleration_enabled = false;
+  leaf_mesh->compact_storage_on_update = false;
+  leaf_mesh->optimize_meshlet_layout = false;
+  VertexAttributes attributes{};
+  attributes.normal = true;
+  attributes.tangent = true;
+  attributes.color = true;
+  attributes.tex_coord = true;
+  leaf_mesh->SetVertices(attributes, snapshot->leaf_vertices, snapshot->leaf_triangles, update_render_geometry);
+  last_mesh_upload_seconds = times.Now() - upload_start;
+
+  geometry_snapshot_ = snapshot;
+  last_rebuild_seconds += times.Now() - publish_start;
+}
+
+void SorghumLS::RebuildGeometry() {
+  PublishGeometrySnapshot(BuildGeometrySnapshot());
 }
 
 void SorghumLS::ExportObj(const std::filesystem::path& path) const {

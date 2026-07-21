@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <glm/glm.hpp>
+#include <glm/gtc/constants.hpp>
 
 // ---------------------------------------------------------------------------
 // SorghumRules.cpp — Phase C
@@ -155,8 +156,8 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         internode.target_thickness = std::max(0.0005f, SamplePlotted(params.internode_thickness, t_pos, node_rng));
         internode.length = 0.0f;
         internode.thickness = 0.0f;
-        internode.branch_angle = 0.0f;  // main culm is upright
-        internode.roll_angle = 0.0f;
+        internode.branch_angle = rank == 0 ? params.main_culm_lean_angle : 0.0f;
+        internode.roll_angle = rank == 0 ? params.branch_azimuth_offset : 0.0f;
         internode.bend_axis_local = glm::vec3(1.0f, 0.0f, 0.0f);
         internode.curvature = 0.0f;
         internode.rank = rank;
@@ -205,9 +206,17 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         leaf.target_waviness = std::max(0.0f, SamplePlotted(params.leaf_waviness, t_pos, node_rng));
         leaf.waviness_frequency = std::max(0.0f, params.leaf_waviness_frequency);
 
+        auto twist_rng = MakeNodeRng(leaf.node_random, 0xA1735C91u);
+        leaf.axial_twist_amplitude_deg =
+            std::uniform_real_distribution<float>(0.0f, params.leaf_axial_twist_max_degrees)(twist_rng);
+        leaf.axial_twist_frequency_ratio = std::uniform_real_distribution<float>(
+            params.leaf_axial_twist_frequency_ratio_min, params.leaf_axial_twist_frequency_ratio_max)(twist_rng);
+        leaf.axial_twist_phase_rad = std::uniform_real_distribution<float>(0.0f, glm::two_pi<float>())(twist_rng);
+
         // Lifecycle scalars sampled per-leaf with node_random as RNG seed —
         // independent draws per cohort, deterministic for a given plant seed.
         auto leaf_rng = MakeNodeRng(leaf.node_random, 0x71F00D11u);
+        leaf.damage_severity = std::clamp(SampleDistribution(params.leaf_damage_severity, leaf_rng), 0.0f, 1.0f);
         leaf.lifespan_years = std::max(0.1f, SampleDistribution(params.leaf_lifespan_years, leaf_rng));
         leaf.wilting_years = std::max(0.05f, SampleDistribution(params.leaf_wilting_years, leaf_rng));
 
@@ -237,10 +246,11 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
             params.tiller_emergence_main_leaf_stages[static_cast<size_t>(std::clamp(origin_rank - 1, 0, 5))];
         bud.insertion_angle = std::max(0.0f, SampleDistribution(params.tiller_insertion_angle, node_rng));
         bud.final_lean_angle = SampleDistribution(params.tiller_final_lean_angle, node_rng);
-        bud.azimuth_offset = NormalizeDegrees(params.branch_azimuth_offset +
-                                              360.0f * static_cast<float>(tiller_selection_index) /
-                                                  static_cast<float>(std::max(1, params.tiller_count)) +
-                                              SampleDistribution(params.tiller_azimuth_jitter, node_rng));
+        bud.azimuth_offset =
+            NormalizeDegrees(apex.phyllotaxis_phase +
+                             ComputeSorghumTillerSameSideSplay(params.tiller_origin_ranks, tiller_selection_index,
+                                                               params.tiller_same_side_splay_angle) +
+                             SampleDistribution(params.tiller_azimuth_jitter, node_rng));
         const float origin_t = static_cast<float>(origin_rank - 1) / 5.0f;
         const float leaf_area_ratio =
             std::clamp(SamplePlotted(params.tiller_leaf_area_ratio_by_origin, origin_t, node_rng), 0.1f, 1.2f);
@@ -349,7 +359,7 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         internode.branch_angle =
             ComputeSorghumTillerInternodeBranchAngle(rank, apex.axis_phytomer_count, apex.insertion_angle,
                                                      apex.final_lean_angle, params.tiller_recovery_axis_fraction);
-        internode.roll_angle = first_lateral_internode ? apex.phyllotaxis_phase : 0.0f;
+        internode.roll_angle = first_lateral_internode ? apex.axis_base_roll_angle : 0.0f;
         internode.bend_axis_local = glm::vec3(1.0f, 0.0f, 0.0f);
         internode.curvature = 0.0f;
         internode.rank = rank;
@@ -402,7 +412,15 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         leaf.target_waviness = std::max(0.0f, SamplePlotted(params.leaf_waviness, t_pos, node_rng));
         leaf.waviness_frequency = std::max(0.0f, params.leaf_waviness_frequency);
 
+        auto twist_rng = MakeNodeRng(leaf.node_random, 0xA1735CA2u);
+        leaf.axial_twist_amplitude_deg =
+            std::uniform_real_distribution<float>(0.0f, params.leaf_axial_twist_max_degrees)(twist_rng);
+        leaf.axial_twist_frequency_ratio = std::uniform_real_distribution<float>(
+            params.leaf_axial_twist_frequency_ratio_min, params.leaf_axial_twist_frequency_ratio_max)(twist_rng);
+        leaf.axial_twist_phase_rad = std::uniform_real_distribution<float>(0.0f, glm::two_pi<float>())(twist_rng);
+
         auto leaf_rng = MakeNodeRng(leaf.node_random, 0x71F00D22u);
+        leaf.damage_severity = std::clamp(SampleDistribution(params.leaf_damage_severity, leaf_rng), 0.0f, 1.0f);
         leaf.lifespan_years = std::max(0.1f, SampleDistribution(params.leaf_lifespan_years, leaf_rng));
         leaf.wilting_years = std::max(0.05f, SampleDistribution(params.leaf_wilting_years, leaf_rng));
 
@@ -482,7 +500,8 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
       apex.order = 1;
       apex.vigor = std::max(1, bud.lateral_phytomer_count);
       apex.phytomer_count = 0;
-      apex.phyllotaxis_phase = NormalizeDegrees(bud.azimuth_offset);
+      apex.phyllotaxis_phase = 0.0f;
+      apex.axis_base_roll_angle = NormalizeDegrees(bud.azimuth_offset);
       apex.node_random = SampleUnit01(node_rng);
       apex.sampled_plastochron_gdd =
           ComputeSorghumTillerCatchUpPlastochron(ComputePlastochronGdd(params, /*order=*/0),

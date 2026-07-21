@@ -20,7 +20,9 @@ git clone --recursive https://github.com/edisonlee0212/EvoEngine.git
 cd EvoEngine
 ```
 
-This sorghum 261 branch uses `Resources/DigitalAgricultureProject` as a Git submodule backed by `Penanito/EvoEngine_SorghumProject`, with large assets stored in Git LFS. Install Git LFS before cloning when possible, then run:
+The sorghum workflow uses `Resources/DigitalAgricultureProject` as a Git submodule backed by
+`Penanito/EvoEngine_SorghumProject`, with large assets stored in Git LFS. Install Git LFS before cloning when possible,
+then run:
 
 ```bash
 git submodule foreach --recursive git lfs pull
@@ -142,15 +144,36 @@ python PythonBinding\sorghum_generate_calibrated_field_scenes.py --skip-10x10 --
 Recalibrate all ten descriptors at the paper-validation sample sizes before scene generation with:
 
 ```bat
-python PythonBinding\sorghum_lsystem_calibrate_date_cultivar_descriptors.py --iteration-sample-count 1000 --validation-sample-count 10000 --max-iterations 6 --worker-count 4
+python PythonBinding\sorghum_lsystem_calibrate_date_cultivar_descriptors.py --iteration-sample-count 1000 --validation-sample-count 10000 --max-iterations 6 --single-process
 python PythonBinding\sorghum_migrate_fidelity_v4_descriptors.py
 python PythonBinding\sorghum_generate_calibrated_field_scenes.py
 ```
 
-The fidelity-v4 descriptors use crown-attached primary tillers, absolute rank-specific blade widths,
-descriptor-owned blade/sheath thickness, stem-fitted overlapping sheaths, subdivision-independent blade-margin
-waviness, the promoted 3x3 leaf atlas, and a continuous textured culm mesh. After the five-stage review is rendered,
-append and publish the mature 10x10 views with:
+These commands use the Release runtime by default. Single-process descriptor calibration avoids concurrent CUDA and
+asset-metadata access on Windows. The 2021 main-culm leaf-count and complete-plant height distributions are mandatory
+fit targets.
+The ten generated date/cultivar descriptors are measured-date snapshots finalized at their stage-specific GDD, so
+their saved geometry matches those calibration targets. The shared L-system remains time-resolved for future
+dynamic-growth work when snapshot finalization is disabled.
+
+The promoted descriptors use crown-attached primary tillers with distichous leaf-axil origins and restrained same-side
+crown splay, absolute rank-specific blade widths,
+descriptor-owned blade/sheath thickness, stem-fitted overlapping sheaths, a reduced static gravity response driven by
+leaf thermal age and along-blade stiffness, deterministic plant-coherent wind deflection and twist, multi-scale
+centerline and margin waviness, the promoted 3x3 leaf atlas, constrained rank/age color and damage variation,
+elliptical sheaths, main-culm lean, and a continuous textured culm mesh. The first three stages use 50% wider blades
+without changing their authored physical thicknesses.
+
+The manual soil mesh carries baked geometric relief derived from its PBR height map, so the EvoEngine RT review uses
+real geometry rather than a raster-only displacement approximation. Rebuild that mesh after replacing the manual PBR
+set with:
+
+```bat
+python PythonBinding\sorghum_bake_soil_relief.py
+```
+
+The scene generator conforms each plant root to the displaced ground surface.
+After the five-stage review is rendered, append and publish the mature 10x10 views with:
 
 ```bat
 python PythonBinding\sorghum_render_10x10_fidelity_review.py --width 3840 --height 2160 --samples 128 --bounces 4 --publish-drive
@@ -159,6 +182,54 @@ python PythonBinding\sorghum_render_10x10_fidelity_review.py --width 3840 --heig
 Each scene is regrown with deterministic seed `2000000`. All nine views per stage use the OptiX skydome with a
 physical `0.526` degree sun, 128 samples, and four bounces. Temporary review cameras never save changes back to scene
 assets. Measurement dates appear in labels and manifests while generated filenames use `GrowthStage01..05`.
+
+Run the supported five-date 4x10 PARBAR campaign with:
+
+```bat
+python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py --replicates 10000 --probes-per-panel 100 --samples 64 --bounces 4 --output-dir out\handoff\sorghum_4x10_parbar_10000
+```
+
+The command generates a different deterministic 40-plant realization for every replicate, reports per-probe mean,
+sample standard deviation, standard error, and 95% interval, and checkpoints after each batch. Add `--resume` with the
+same arguments after an interruption. The values are relative EvoEngine illumination estimates; physical conversion
+and interpretation belong to the illumination analysis.
+
+For the optional 25-second paper video, run 100 realizations per date with `--video`:
+
+```bat
+python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py --replicates 100 --probes-per-panel 100 --samples 64 --bounces 4 --video --output-dir out\handoff\sorghum_4x10_parbar_video_100
+```
+
+Video output is limited to at most 300 realizations, requires Pillow plus `ffmpeg` and `ffprobe`, and does not alter the
+scientific CSV calculation. The CSV-only 10,000-replicate run remains the production path.
+
+`PythonBinding/sorghum_4x10_scene.py` is the small importable boundary for custom analysis. Resolve one date with
+`query_4x10_scene(...)`, prepare its in-process scene once, then call `grow_4x10_scene(...)` for each morphology seed.
+The scene uses EvoEngine Y-up coordinates, and `plant_organ_ids(...)` returns plant, main-culm, tiller, and leaf IDs.
+Probe construction and all illumination settings remain caller-owned.
+
+Run `python PythonBinding\sorghum_validate_gpu_field_geometry.py` after engine changes. It compares the destructive
+CPU reference with persistent and replayed snapshots, requires a different seed to diverge, compares fixed-seed
+PARBAR outputs, and verifies that OptiX GAS and IAS updates occurred.
+
+```python
+from pathlib import Path
+from sorghum_4x10_scene import query_4x10_scene, prepare_4x10_scene, grow_4x10_scene
+
+# After configuring the build paths and importing PyDigitalAgriculture as evo:
+project = Path("Resources/DigitalAgricultureProject")
+packages = Path("out/build/vs2026-x64/EvoEngine_App/RelWithDebInfo/Packages")
+scene = query_4x10_scene(
+    project / "Assets/GeneratedAssets/Reports/field_manifest.csv",
+    Path("GeneratedAssets/Descriptors"),
+    "2021-08-30",
+)
+prepare_4x10_scene(evo, project / "test_lsystem_sorghum.eveproj", packages, scene, 2_000_000, 2 / 3, 2, 30000)
+probes = create_my_parbar_probes(evo, scene)
+grow_4x10_scene(evo, scene, geometry_seed=2_001_000, max_wait_frames=30000)
+```
+
+The full CSV command above already uses this API; the sketch is only for a consumer supplying custom probe logic.
 
 ## Related Publications
 

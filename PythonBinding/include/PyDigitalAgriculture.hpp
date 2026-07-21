@@ -9,6 +9,7 @@
 // #  include "EditorLayer.hpp"
 // #  include "HeightField.hpp"
 // #  include "MeshRenderer.hpp"
+#  include <array>
 #  include <map>
 #  include "EditorLayer.hpp"
 #  include "IPrivateComponent.hpp"
@@ -94,10 +95,54 @@ struct LSystemAxisPhenotypeRecord {
   int axis_id = 0;
   int origin_rank = 0;
   uint32_t leaf_count = 0;
+  uint32_t expanded_leaf_count = 0;
   uint32_t internode_count = 0;
+  float origin_height_m = 0.0f;
   float culm_tip_height_m = 0.0f;
+  float culm_departure_degrees = 0.0f;
+  float highest_mature_collar_height_m = 0.0f;
   float leaf_ratio_to_main = 1.0f;
   float height_ratio_to_main = 1.0f;
+};
+
+struct LSystemLeafPhenotypeRecord {
+  int axis_id = 0;
+  int origin_rank = 0;
+  int rank = 0;
+  int axis_phytomer_count = 0;
+  float normalized_rank = 0.0f;
+  float age_gdd = 0.0f;
+  float growth_progress = 0.0f;
+  float blade_length_m = 0.0f;
+  float target_blade_length_m = 0.0f;
+  float blade_width_m = 0.0f;
+  float target_blade_width_m = 0.0f;
+  float collar_height_m = 0.0f;
+  float tip_height_m = 0.0f;
+  float maximum_height_m = 0.0f;
+  float chord_elevation_degrees = 0.0f;
+  float distal_elevation_degrees = 0.0f;
+  float gravity_tip_deflection_m = 0.0f;
+  float centerline_lateral_span_m = 0.0f;
+  float centerline_arc_to_chord_ratio = 1.0f;
+  float surface_waviness_rms_m = 0.0f;
+  bool alive = false;
+};
+
+struct LSystemInternodePhenotypeRecord {
+  int axis_id = 0;
+  int origin_rank = 0;
+  int rank = 0;
+  int axis_phytomer_count = 0;
+  float normalized_rank = 0.0f;
+  float age_gdd = 0.0f;
+  float growth_progress = 0.0f;
+  float length_m = 0.0f;
+  float target_length_m = 0.0f;
+  float diameter_m = 0.0f;
+  float target_diameter_m = 0.0f;
+  float base_height_m = 0.0f;
+  float tip_height_m = 0.0f;
 };
 
 struct LSystemDescriptorPhenotypeRecord {
@@ -105,17 +150,29 @@ struct LSystemDescriptorPhenotypeRecord {
   uint32_t leaf_count = 0;
   uint32_t live_leaf_count = 0;
   uint32_t main_culm_leaf_count = 0;
+  uint32_t main_culm_expanded_leaf_count = 0;
   uint32_t tiller_leaf_count = 0;
+  uint32_t tiller_expanded_leaf_count = 0;
   uint32_t primary_tiller_count = 0;
   uint32_t triangle_count = 0;
   uint32_t leaf_triangle_count = 0;
   uint32_t stem_triangle_count = 0;
   float height_m = 0.0f;
+  float main_culm_tip_height_m = 0.0f;
+  float main_culm_highest_mature_collar_height_m = 0.0f;
+  float main_culm_tip_height_ratio = 0.0f;
+  float main_culm_mature_collar_height_ratio = 0.0f;
+  float main_culm_max_blade_length_m = 0.0f;
+  float main_culm_max_target_blade_length_m = 0.0f;
+  float main_culm_max_blade_width_m = 0.0f;
+  float main_culm_max_target_blade_width_m = 0.0f;
   float area = 0.0f;
   float leaf_area = 0.0f;
   float stem_area = 0.0f;
   bool has_geometry = false;
   std::vector<LSystemAxisPhenotypeRecord> axes;
+  std::vector<LSystemLeafPhenotypeRecord> leaves;
+  std::vector<LSystemInternodePhenotypeRecord> internodes;
 };
 
 struct LSystemPlantSceneMetadataRecord {
@@ -129,6 +186,19 @@ struct LSystemPlantSceneMetadataRecord {
   uint32_t main_culm_leaf_count = 0;
   uint32_t tiller_leaf_count = 0;
   uint32_t primary_tiller_count = 0;
+  uint32_t geometry_snapshot_schema_version = 0;
+  uint64_t geometry_snapshot_version = 0;
+  uint32_t geometry_snapshot_organ_count = 0;
+  uint32_t leaf_vertex_count = 0;
+  uint32_t leaf_triangle_count = 0;
+  uint32_t culm_vertex_count = 0;
+  uint32_t culm_triangle_count = 0;
+  double last_grow_seconds = 0.0;
+  double last_rebuild_seconds = 0.0;
+  double last_rebuild_internode_seconds = 0.0;
+  double last_leaf_spline_seconds = 0.0;
+  double last_leaf_mesh_seconds = 0.0;
+  double last_mesh_upload_seconds = 0.0;
   float leaf_width_scale = 1.0f;
   float leaf_thickness_m = 0.001f;
   float plant_height_m = 0.0f;
@@ -212,7 +282,11 @@ class PyDigitalAgriculture {
   static bool CaptureCurrentSceneRayTraced(int resolution_x, int resolution_y, const std::filesystem::path& output_path,
                                            int samples = 64, int bounces = 4, float gamma = 2.2f);
 
-  static size_t GrowSorghumLsPlantsToAdulthood(int seed_base = -1, const std::string& cultivar_filter = "");
+  static std::array<uint64_t, 4> GetRayTracerBuildCounters();
+
+  static size_t GrowSorghumLsPlantsToAdulthood(int seed_base = -1, const std::string& cultivar_filter = "",
+                                               bool reuse_geometry_entities = false,
+                                               bool update_render_geometry = true);
 
   static size_t SetSorghumLsLeafThickness(float leaf_thickness_m, bool regenerate_geometry = true);
 
@@ -223,6 +297,8 @@ class PyDigitalAgriculture {
                                                 bool regenerate_geometry = true, int seed_base = -1);
 
   static size_t SetSorghumLsGridSpacing(float spacing_x, float spacing_z, const std::string& cultivar_filter = "");
+
+  static size_t ConformSorghumLsPlantsToGroundMesh();
 
   static size_t RemoveSorghumLsPseudoTillerPlants();
 
@@ -250,7 +326,13 @@ class PyDigitalAgriculture {
       const std::filesystem::path& base_descriptor_path, float leaf_modules_mean, float leaf_modules_deviation,
       float length_mean_scale, float length_deviation_scale, int sample_count = 1000, int seed_base = 0,
       float leaf_width_scale = 1.0f, float main_culm_diameter_m = 0.0f, float tiller_leaf_count_ratio = 0.90f,
-      float tiller_height_ratio = 0.90f);
+      float tiller_height_ratio = 0.90f, bool finalize_snapshot = true, bool include_organs = false,
+      float leaf_length_mean_scale = 0.0f, float leaf_length_deviation_scale = 0.0f,
+      float leaf_gravity_droop_compliance = -1.0f, float target_gdd = -1.0f);
+
+  static std::vector<LSystemDescriptorPhenotypeRecord> SampleSorghumLsDescriptorAssetPhenotypes(
+      const std::filesystem::path& descriptor_path, int sample_count = 1000, int seed_base = 0,
+      bool finalize_snapshot = true, bool include_organs = false, float leaf_gravity_droop_compliance = -1.0f);
 
   static bool SaveCalibratedSorghumLsDescriptor(const std::filesystem::path& base_descriptor_path,
                                                 const std::filesystem::path& output_descriptor_path,
@@ -258,7 +340,13 @@ class PyDigitalAgriculture {
                                                 float length_mean_scale, float length_deviation_scale,
                                                 float leaf_width_scale = 1.0f, float main_culm_diameter_m = 0.0f,
                                                 float tiller_leaf_count_ratio = 0.90f,
-                                                float tiller_height_ratio = 0.90f);
+                                                float tiller_height_ratio = 0.90f, float leaf_length_mean_scale = 0.0f,
+                                                float leaf_length_deviation_scale = 0.0f, float target_gdd = -1.0f);
+
+  static bool ScaleSorghumLsDescriptorOrganLengths(const std::filesystem::path& descriptor_path,
+                                                   float internode_mean_scale, float internode_deviation_scale,
+                                                   float leaf_mean_scale = 1.0f, float leaf_deviation_scale = 1.0f,
+                                                   float leaf_gravity_droop_compliance = -1.0f);
 
   static bool SaveActiveSceneAsProjectAsset(const std::filesystem::path& scene_asset_path);
 

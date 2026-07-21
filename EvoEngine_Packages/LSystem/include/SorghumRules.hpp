@@ -42,6 +42,7 @@ struct SampledSorghumParams {
   int total_phytomer_count = 14;       ///< Total phytomers on main culm.
   float phyllotaxis_angle = 180.0f;    ///< Distichous default; cultivar-tunable.
   float branch_azimuth_offset = 0.0f;  ///< Roll offset of the first lateral.
+  float main_culm_lean_angle = 0.0f;
 
   // ===== Internode morphology (rank-indexed plotted distributions) =====
   evo_engine::PlottedDistribution<float> internode_length;     ///< (m) by rank
@@ -64,7 +65,20 @@ struct SampledSorghumParams {
   evo_engine::PlottedDistribution<float> leaf_bending;     ///< (deg)
   evo_engine::PlottedDistribution<float> leaf_waviness;    ///< amplitude
   float leaf_waviness_frequency = 8.0f;                    ///< constant cycles/length
+  evo_engine::PlottedDistribution<float> leaf_waviness_width_fraction;
+  float leaf_waviness_wavelength_m = 0.0f;
+  float leaf_centerline_waviness_fraction = 0.0f;
+  float leaf_static_wind_deflection_fraction = 0.0f;
+  float leaf_axial_twist_max_degrees = 0.0f;
+  float leaf_axial_twist_frequency_ratio_min = 0.35f;
+  float leaf_axial_twist_frequency_ratio_max = 0.5f;
+  float leaf_static_wind_azimuth_degrees = 0.0f;
+  float leaf_gravity_droop_compliance = 0.0f;
+  evo_engine::PlottedDistribution<float> leaf_gravity_droop_age_response;
+  evo_engine::PlottedDistribution<float> leaf_flexural_stiffness_along_leaf;
+  evo_engine::SingleDistribution<float> leaf_damage_severity{0.0f};
   float leaf_sheath_radius_ratio = 1.05f;
+  float leaf_sheath_cross_section_ratio = 1.0f;
   float leaf_sheath_wrap_angle = 390.0f;
   float leaf_blade_stage1_length_ratio = 0.33f;  ///< [deprecated] blade internal stage split
   float leaf_blade_stage2_length_ratio = 0.34f;  ///< [deprecated] blade internal stage split
@@ -84,6 +98,7 @@ struct SampledSorghumParams {
   evo_engine::SingleDistribution<float> tiller_insertion_angle{35.0f};
   evo_engine::SingleDistribution<float> tiller_final_lean_angle{0.0f};
   evo_engine::SingleDistribution<float> tiller_azimuth_jitter{0.0f};
+  float tiller_same_side_splay_angle = 12.0f;
   float tiller_recovery_axis_fraction = 1.0f;
   evo_engine::SingleDistribution<float> tiller_leaf_count_ratio{0.90f, 0.03f};
   evo_engine::SingleDistribution<float> tiller_height_ratio{0.90f, 0.03f};
@@ -131,6 +146,25 @@ inline int ComputeSorghumTillerSelectionIndex(const SampledSorghumParams& params
   return it == params.tiller_origin_ranks.end()
              ? -1
              : static_cast<int>(std::distance(params.tiller_origin_ranks.begin(), it));
+}
+
+inline float ComputeSorghumTillerSameSideSplay(const std::vector<int>& origin_ranks, const int selection_index,
+                                               const float spacing_degrees) {
+  if (selection_index < 0 || selection_index >= static_cast<int>(origin_ranks.size())) {
+    return 0.0f;
+  }
+  const int parity = origin_ranks[static_cast<size_t>(selection_index)] & 1;
+  int same_side_count = 0;
+  int same_side_index = 0;
+  for (int i = 0; i < static_cast<int>(origin_ranks.size()); ++i) {
+    if ((origin_ranks[static_cast<size_t>(i)] & 1) != parity) {
+      continue;
+    }
+    same_side_index += i < selection_index ? 1 : 0;
+    ++same_side_count;
+  }
+  return (static_cast<float>(same_side_index) - 0.5f * static_cast<float>(same_side_count - 1)) *
+         std::max(0.0f, spacing_degrees);
 }
 
 inline int ComputeSorghumTillerLeafBudget(const int main_leaf_count, const float leaf_count_ratio) {

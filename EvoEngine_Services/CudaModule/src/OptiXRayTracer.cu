@@ -1420,16 +1420,33 @@ __global__ void CopySkinnedVerticesKernel(const int size, SkinnedVertex *vertice
   }
 }
 
-void RayTracedGeometry::BuildGas(const OptixDeviceContext &context) {
+bool RayTracedGeometry::BuildGas(const OptixDeviceContext &context) {
+  const size_t current_vertex_count = renderer_type == RendererType::Default && vertices ? vertices->size() : 0;
+  const size_t current_primitive_count = renderer_type == RendererType::Default && triangles ? triangles->size() : 0;
+  uint64_t current_topology_hash = 14695981039346656037ull;
+  if (renderer_type == RendererType::Default && triangles) {
+    for (const auto &triangle : *triangles) {
+      for (const uint32_t index : {triangle.x, triangle.y, triangle.z}) {
+        current_topology_hash ^= index;
+        current_topology_hash *= 1099511628211ull;
+      }
+    }
+  }
+  const bool update_existing = renderer_type == RendererType::Default && gas_allows_update && traversable_handle &&
+                               accelerated_structure_buffer.d_ptr && gas_vertex_count == current_vertex_count &&
+                               gas_primitive_count == current_primitive_count &&
+                               gas_topology_hash == current_topology_hash;
 #pragma region Clean previous buffer
-  vertex_data_buffer.Free();
-  triangle_buffer.Free();
+  if (!update_existing) {
+    vertex_data_buffer.Free();
+    triangle_buffer.Free();
 
-  curve_strand_u_buffer.Free();
-  curve_strand_i_buffer.Free();
-  curve_strand_info_buffer.Free();
+    curve_strand_u_buffer.Free();
+    curve_strand_i_buffer.Free();
+    curve_strand_info_buffer.Free();
 
-  accelerated_structure_buffer.Free();
+    accelerated_structure_buffer.Free();
+  }
 #pragma endregion
 
   CudaBuffer device_position_buffer;
@@ -1641,68 +1658,59 @@ void RayTracedGeometry::BuildGas(const OptixDeviceContext &context) {
   // ==================================================================
 
   OptixAccelBuildOptions accelerate_options = {};
-  accelerate_options.buildFlags =
-      OPTIX_BUILD_FLAG_NONE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+  accelerate_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_COMPACTION | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE;
+  if (renderer_type == RendererType::Default) {
+    accelerate_options.buildFlags |= OPTIX_BUILD_FLAG_ALLOW_UPDATE;
+  }
   accelerate_options.motionOptions.numKeys = 1;
-  accelerate_options.operation = OPTIX_BUILD_OPERATION_BUILD;
+  accelerate_options.operation = update_existing ? OPTIX_BUILD_OPERATION_UPDATE : OPTIX_BUILD_OPERATION_BUILD;
 
   OptixAccelBufferSizes blas_buffer_sizes;
   OPTIX_CHECK(optixAccelComputeMemoryUsage(context, &accelerate_options, &build_input,
                                            1,  // num_build_inputs
                                            &blas_buffer_sizes));
 #pragma endregion
-#pragma region Prapere compaction
-  // ==================================================================
-  // prepare compaction
-  // ==================================================================
-
-  CudaBuffer compacted_size_buffer;
-  compacted_size_buffer.Resize(sizeof(uint64_t));
-  OptixAccelEmitDesc emit_desc;
-  emit_desc.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
-  emit_desc.result = compacted_size_buffer.DevicePointer();
-#pragma endregion
-#pragma region Build AS
-  // ==================================================================
-  // execute build (main stage)
-  // ==================================================================
-
   CudaBuffer temp_buffer;
-  temp_buffer.Resize(blas_buffer_sizes.tempSizeInBytes);
+  if (update_existing) {
+    temp_buffer.Resize(blas_buffer_sizes.tempUpdateSizeInBytes);
+    OPTIX_CHECK(optixAccelBuild(context, nullptr, &accelerate_options, &build_input, 1, temp_buffer.DevicePointer(),
+                                temp_buffer.size_in_bytes, accelerated_structure_buffer.DevicePointer(),
+                                accelerated_structure_buffer.size_in_bytes, &traversable_handle, nullptr, 0));
+    CUDA_SYNC_CHECK();
+  } else {
+    CudaBuffer compacted_size_buffer;
+    compacted_size_buffer.Resize(sizeof(uint64_t));
+    OptixAccelEmitDesc emit_desc;
+    emit_desc.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+    emit_desc.result = compacted_size_buffer.DevicePointer();
 
-  CudaBuffer output_buffer;
-  output_buffer.Resize(blas_buffer_sizes.outputSizeInBytes);
+    temp_buffer.Resize(blas_buffer_sizes.tempSizeInBytes);
+    CudaBuffer output_buffer;
+    output_buffer.Resize(blas_buffer_sizes.outputSizeInBytes);
+    OPTIX_CHECK(optixAccelBuild(context, nullptr, &accelerate_options, &build_input, 1, temp_buffer.DevicePointer(),
+                                temp_buffer.size_in_bytes, output_buffer.DevicePointer(), output_buffer.size_in_bytes,
+                                &traversable_handle, &emit_desc, 1));
+    CUDA_SYNC_CHECK();
 
-  OPTIX_CHECK(optixAccelBuild(context,
-                              /* stream */ nullptr, &accelerate_options, &build_input, 1, temp_buffer.DevicePointer(),
-                              temp_buffer.size_in_bytes, output_buffer.DevicePointer(), output_buffer.size_in_bytes,
-                              &traversable_handle, &emit_desc, 1));
-  CUDA_SYNC_CHECK();
-#pragma endregion
-#pragma region Perform compaction
-  // ==================================================================
-  // perform compaction
-  // ==================================================================
-  uint64_t compacted_size;
-  compacted_size_buffer.Download(&compacted_size, 1);
-  accelerated_structure_buffer.Resize(compacted_size);
-  OPTIX_CHECK(optixAccelCompact(context,
-                                /*stream:*/ nullptr, traversable_handle, accelerated_structure_buffer.DevicePointer(),
-                                accelerated_structure_buffer.size_in_bytes, &traversable_handle));
-  CUDA_SYNC_CHECK();
-#pragma endregion
-#pragma region Compaction clean up
-  // ==================================================================
-  // and .... clean up
-  // ==================================================================
-  output_buffer.Free();  // << the Un-compacted, temporary output buffer
+    uint64_t compacted_size;
+    compacted_size_buffer.Download(&compacted_size, 1);
+    accelerated_structure_buffer.Resize(compacted_size);
+    OPTIX_CHECK(optixAccelCompact(context, nullptr, traversable_handle, accelerated_structure_buffer.DevicePointer(),
+                                  accelerated_structure_buffer.size_in_bytes, &traversable_handle));
+    CUDA_SYNC_CHECK();
+    output_buffer.Free();
+    compacted_size_buffer.Free();
+    gas_vertex_count = current_vertex_count;
+    gas_primitive_count = current_primitive_count;
+    gas_topology_hash = current_topology_hash;
+    gas_allows_update = renderer_type == RendererType::Default;
+  }
   temp_buffer.Free();
-  compacted_size_buffer.Free();
-#pragma endregion
 
   device_position_buffer.Free();
   device_width_buffer.Free();
   update_flag = false;
+  return update_existing;
 }
 
 void RayTracedGeometry::UploadForSbt() {
@@ -1742,7 +1750,11 @@ void OptiXRayTracer::BuildIas() {
   }
   for (auto &i : geometries) {
     if (i.second.update_flag) {
-      i.second.BuildGas(optix_device_context_);
+      if (i.second.BuildGas(optix_device_context_)) {
+        ++gas_update_count;
+      } else {
+        ++gas_build_count;
+      }
       i.second.UploadForSbt();
     }
   }
@@ -1785,8 +1797,9 @@ void OptiXRayTracer::BuildIas() {
   build_input.instanceArray.numInstances = static_cast<unsigned int>(optix_instances.size());
 
   OptixAccelBuildOptions accel_build_options = {};
-  accel_build_options.buildFlags = OPTIX_BUILD_FLAG_NONE;
-  accel_build_options.operation = OPTIX_BUILD_OPERATION_BUILD;
+  const bool update_ias = ias_handle_ && ias_buffer_.d_ptr && ias_instance_count_ == optix_instances.size();
+  accel_build_options.buildFlags = OPTIX_BUILD_FLAG_ALLOW_UPDATE;
+  accel_build_options.operation = update_ias ? OPTIX_BUILD_OPERATION_UPDATE : OPTIX_BUILD_OPERATION_BUILD;
 
   OptixAccelBufferSizes buffer_sizes_ias;
   OPTIX_CHECK(optixAccelComputeMemoryUsage(optix_device_context_, &accel_build_options, &build_input,
@@ -1794,26 +1807,33 @@ void OptiXRayTracer::BuildIas() {
                                            &buffer_sizes_ias));
 
   CudaBuffer device_temp_buffer_ias;
-  device_temp_buffer_ias.Resize(buffer_sizes_ias.tempSizeInBytes);
-  ias_buffer_.Resize(buffer_sizes_ias.outputSizeInBytes);
+  device_temp_buffer_ias.Resize(update_ias ? buffer_sizes_ias.tempUpdateSizeInBytes : buffer_sizes_ias.tempSizeInBytes);
+  if (!update_ias) {
+    ias_buffer_.Resize(buffer_sizes_ias.outputSizeInBytes);
+  }
 
-  OptixTraversableHandle i_as_handle = 0;
   OPTIX_CHECK(optixAccelBuild(optix_device_context_,
                               nullptr,  // CUDA stream
                               &accel_build_options, &build_input,
                               1,  // num build inputs
-                              device_temp_buffer_ias.DevicePointer(), buffer_sizes_ias.tempSizeInBytes,
-                              ias_buffer_.DevicePointer(), buffer_sizes_ias.outputSizeInBytes, &i_as_handle,
+                              device_temp_buffer_ias.DevicePointer(), device_temp_buffer_ias.size_in_bytes,
+                              ias_buffer_.DevicePointer(), ias_buffer_.size_in_bytes, &ias_handle_,
                               nullptr,  // emitted property list
                               0));      // num emitted properties
   device_temp_instances.Free();
   device_temp_buffer_ias.Free();
+  ias_instance_count_ = optix_instances.size();
+  if (update_ias) {
+    ++ias_update_count;
+  } else {
+    ++ias_build_count;
+  }
 
-  camera_rendering_launch_params_.traversable = i_as_handle;
-  camera_spectral_launch_params_.traversable = i_as_handle;
-  illumination_estimation_launch_params_.traversable = i_as_handle;
-  illumination_estimation_spectral_launch_params_.traversable = i_as_handle;
-  point_cloud_scanning_launch_params_.traversable = i_as_handle;
+  camera_rendering_launch_params_.traversable = ias_handle_;
+  camera_spectral_launch_params_.traversable = ias_handle_;
+  illumination_estimation_launch_params_.traversable = ias_handle_;
+  illumination_estimation_spectral_launch_params_.traversable = ias_handle_;
+  point_cloud_scanning_launch_params_.traversable = ias_handle_;
   has_acceleration_structure_ = true;
   scene_modified = true;
 }

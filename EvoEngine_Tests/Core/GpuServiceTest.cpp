@@ -409,6 +409,47 @@ TEST(GpuService, GeometryStorageCommitsMeshRangesAfterAsyncUpload) {
   EXPECT_EQ(triangle_range->prev_frame_offset, triangle_range->offset);
 }
 
+TEST(GpuService, HostOnlyMeshCanReturnToVisualStorage) {
+  ScopedGpuPlatform platform;
+  auto& gpu_service = Platform::GetGpuService();
+
+  Mesh mesh;
+  mesh.OnCreate();
+  VertexAttributes attributes{};
+  attributes.normal = true;
+  attributes.tangent = true;
+  std::vector<Vertex> vertices(3);
+  vertices[0].position = glm::vec3(0.0f, 0.0f, 0.0f);
+  vertices[1].position = glm::vec3(1.0f, 0.0f, 0.0f);
+  vertices[2].position = glm::vec3(0.0f, 1.0f, 0.0f);
+  vertices[0].normal = vertices[1].normal = vertices[2].normal = glm::vec3(0.0f, 0.0f, 1.0f);
+  vertices[0].tangent = vertices[1].tangent = vertices[2].tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+  const std::vector<glm::uvec3> triangles = {glm::uvec3(0, 1, 2)};
+
+  mesh.SetVertices(attributes, vertices, triangles, false);
+  ASSERT_EQ(mesh.PeekVertices().size(), vertices.size());
+  ASSERT_EQ(mesh.PeekTriangles().size(), triangles.size());
+  EXPECT_FLOAT_EQ(mesh.PeekVertices()[1].position.x, 1.0f);
+  EXPECT_EQ(mesh.PeekTriangles()[0].x, 0u);
+  EXPECT_EQ(mesh.PeekTriangles()[0].y, 1u);
+  EXPECT_EQ(mesh.PeekTriangles()[0].z, 2u);
+  EXPECT_EQ(mesh.GetTriangleRange()->range, 0u);
+
+  mesh.SetVertices(attributes, vertices, {glm::uvec3(0, 1, 3)}, false);
+  EXPECT_TRUE(mesh.PeekVertices().empty());
+  EXPECT_TRUE(mesh.PeekTriangles().empty());
+  EXPECT_EQ(mesh.GetTriangleRange()->range, 0u);
+
+  vertices[1].position.x = 2.0f;
+  mesh.SetVertices(attributes, vertices, triangles);
+  PlatformLifecycleTestAccess::PreUpdate();
+  gpu_service.WaitIdle();
+  PlatformLifecycleTestAccess::PreUpdate();
+
+  EXPECT_FLOAT_EQ(mesh.PeekVertices()[1].position.x, 2.0f);
+  EXPECT_EQ(mesh.GetTriangleRange()->prev_frame_index_count, 1u);
+}
+
 TEST(GpuService, GeometryStorageUploadsCompactedMeshTail) {
   ScopedGpuPlatform platform;
   auto& gpu_service = Platform::GetGpuService();

@@ -248,6 +248,7 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   ClampSingleDistribution(descriptor.total_phytomer_count, 1.0f, 128.0f, 64.0f);
   ClampSingleDistribution(descriptor.phyllotaxis_angle, 0.0f, 360.0f, 180.0f);
   ClampSingleDistribution(descriptor.branch_azimuth_offset, -180.0f, 180.0f, 180.0f);
+  ClampSingleDistribution(descriptor.main_culm_lean_angle, 0.0f, 30.0f, 20.0f);
 
   ClampPlottedDistributionRange(descriptor.internode_length, 0.0f, 1.0f, 0.5f);
   ClampPlottedDistributionRange(descriptor.internode_thickness, 0.0f, 0.1f, 0.05f);
@@ -267,8 +268,22 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   ClampPlottedDistributionRange(descriptor.leaf_curling, 0.0f, 90.0f, 45.0f);
   ClampPlottedDistributionRange(descriptor.leaf_bending, -180.0f, 180.0f, 180.0f);
   ClampPlottedDistributionRange(descriptor.leaf_waviness, 0.0f, 0.3f, 0.2f);
+  ClampPlottedDistributionRange(descriptor.leaf_waviness_width_fraction, 0.0f, 1.0f, 0.5f);
   ClampSingleDistribution(descriptor.leaf_waviness_frequency, 0.0f, 100.0f, 50.0f);
+  ClampSingleDistribution(descriptor.leaf_waviness_wavelength_m, 0.0f, 5.0f, 2.5f);
+  ClampSingleDistribution(descriptor.leaf_centerline_waviness_fraction, 0.0f, 0.1f, 0.05f);
+  ClampSingleDistribution(descriptor.leaf_static_wind_deflection_fraction, 0.0f, 0.2f, 0.1f);
+  ClampSingleDistribution(descriptor.leaf_axial_twist_max_degrees, 0.0f, 45.0f, 30.0f);
+  ClampSingleDistribution(descriptor.leaf_axial_twist_frequency_ratio_min, 0.0f, 0.5f, 0.5f);
+  ClampSingleDistribution(descriptor.leaf_axial_twist_frequency_ratio_max, 0.0f, 0.5f, 0.5f);
+  descriptor.leaf_axial_twist_frequency_ratio_max.mean = std::max(descriptor.leaf_axial_twist_frequency_ratio_min.mean,
+                                                                  descriptor.leaf_axial_twist_frequency_ratio_max.mean);
+  ClampSingleDistribution(descriptor.leaf_gravity_droop_compliance, 0.0f, 5.0f, 2.5f);
+  ClampPlottedDistributionRange(descriptor.leaf_gravity_droop_age_response, 0.0f, 1.0f, 1.0f);
+  ClampPlottedDistributionRange(descriptor.leaf_flexural_stiffness_along_leaf, 0.01f, 2.0f, 1.0f);
+  ClampSingleDistribution(descriptor.leaf_damage_severity, 0.0f, 1.0f, 0.5f);
   ClampSingleDistribution(descriptor.leaf_sheath_radius_ratio, 1.0f, 3.0f, 1.0f);
+  ClampSingleDistribution(descriptor.leaf_sheath_cross_section_ratio, 1.0f, 3.0f, 1.0f);
   ClampSingleDistribution(descriptor.leaf_sheath_wrap_angle, 180.0f, 540.0f, 180.0f);
   ClampSingleDistribution(descriptor.leaf_blade_stage1_length_ratio, 0.0f, 1.0f, 1.0f);
   ClampSingleDistribution(descriptor.leaf_blade_stage2_length_ratio, 0.0f, 1.0f, 1.0f);
@@ -295,6 +310,7 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   ClampSingleDistribution(descriptor.tiller_insertion_angle, 0.0f, 120.0f, 60.0f);
   ClampSingleDistribution(descriptor.tiller_final_lean_angle, -30.0f, 30.0f, 30.0f);
   ClampSingleDistribution(descriptor.tiller_azimuth_jitter, -45.0f, 45.0f, 45.0f);
+  ClampSingleDistribution(descriptor.tiller_same_side_splay_angle, 0.0f, 45.0f, 20.0f);
   descriptor.tiller_recovery_axis_fraction = std::clamp(descriptor.tiller_recovery_axis_fraction, 0.05f, 1.0f);
   ClampSingleDistribution(descriptor.tiller_leaf_count_ratio, 0.5f, 1.1f, 0.3f);
   ClampSingleDistribution(descriptor.tiller_height_ratio, 0.5f, 1.1f, 0.3f);
@@ -331,6 +347,10 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   descriptor.leaf_material_roughness = std::clamp(descriptor.leaf_material_roughness, 0.0f, 1.0f);
   descriptor.leaf_material_metallic = std::clamp(descriptor.leaf_material_metallic, 0.0f, 1.0f);
   descriptor.leaf_material_specular = std::clamp(descriptor.leaf_material_specular, 0.0f, 1.0f);
+  descriptor.leaf_material_subsurface_factor = std::clamp(descriptor.leaf_material_subsurface_factor, 0.0f, 1.0f);
+  descriptor.leaf_material_subsurface_color =
+      glm::clamp(descriptor.leaf_material_subsurface_color, glm::vec3(0.0f), glm::vec3(1.0f));
+  descriptor.leaf_material_subsurface_radius = glm::max(descriptor.leaf_material_subsurface_radius, glm::vec3(0.0f));
   descriptor.stem_material_albedo_color =
       glm::clamp(descriptor.stem_material_albedo_color, glm::vec3(0.0f), glm::vec3(1.0f));
   descriptor.stem_material_roughness = std::clamp(descriptor.stem_material_roughness, 0.0f, 1.0f);
@@ -344,14 +364,18 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
 }  // namespace
 
 SorghumLSDescriptor::SorghumLSDescriptor() {
-  ApplyMeanStdPlotDefaultsToAll(internode_length, internode_thickness, leaf_blade_length, leaf_blade_max_width,
-                                leaf_blade_thickness, leaf_sheath_thickness, leaf_sheath_length, leaf_neck_length,
-                                leaf_sheath_end_width_ratio, leaf_neck_end_width_ratio, leaf_blade_end_width_ratio,
-                                leaf_insertion_angle, leaf_roll_angle, leaf_curling, leaf_bending, leaf_waviness,
-                                tiller_leaf_area_ratio_by_origin, tiller_initiation_delay_gdd);
+  ApplyMeanStdPlotDefaultsToAll(
+      internode_length, internode_thickness, leaf_blade_length, leaf_blade_max_width, leaf_blade_thickness,
+      leaf_sheath_thickness, leaf_sheath_length, leaf_neck_length, leaf_sheath_end_width_ratio,
+      leaf_neck_end_width_ratio, leaf_blade_end_width_ratio, leaf_insertion_angle, leaf_roll_angle, leaf_curling,
+      leaf_bending, leaf_waviness, leaf_waviness_width_fraction, leaf_gravity_droop_age_response,
+      leaf_flexural_stiffness_along_leaf, tiller_leaf_area_ratio_by_origin, tiller_initiation_delay_gdd);
 
   SetConstantPlottedDistribution(leaf_blade_thickness, 0.00045f);
   SetConstantPlottedDistribution(leaf_sheath_thickness, 0.00045f);
+  SetConstantPlottedDistribution(leaf_waviness_width_fraction, 0.0f);
+  SetConstantPlottedDistribution(leaf_gravity_droop_age_response, 1.0f);
+  SetConstantPlottedDistribution(leaf_flexural_stiffness_along_leaf, 1.0f);
 
   SetConstantPlottedDistribution(leaf_sheath_end_width_ratio, 1.35f);
   SetConstantPlottedDistribution(leaf_neck_end_width_ratio, 1.7f);
@@ -391,6 +415,7 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.total_phytomer_count = std::max(1, static_cast<int>(std::round(SampleDistribution(total_phytomer_count, rng))));
   p.phyllotaxis_angle = SampleDistribution(phyllotaxis_angle, rng);
   p.branch_azimuth_offset = SampleDistribution(branch_azimuth_offset, rng);
+  p.main_culm_lean_angle = std::clamp(SampleDistribution(main_culm_lean_angle, rng), 0.0f, 30.0f);
 
   // Internode + leaf morphology distributions are forwarded by value; rule
   // lambdas re-evaluate them per emission to keep deterministic sampling
@@ -414,7 +439,23 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.leaf_bending = leaf_bending;
   p.leaf_waviness = leaf_waviness;
   p.leaf_waviness_frequency = std::max(0.0f, SampleDistribution(leaf_waviness_frequency, rng));
+  p.leaf_waviness_width_fraction = leaf_waviness_width_fraction;
+  p.leaf_waviness_wavelength_m = std::max(0.0f, SampleDistribution(leaf_waviness_wavelength_m, rng));
+  p.leaf_centerline_waviness_fraction = std::max(0.0f, SampleDistribution(leaf_centerline_waviness_fraction, rng));
+  p.leaf_static_wind_deflection_fraction =
+      std::max(0.0f, SampleDistribution(leaf_static_wind_deflection_fraction, rng));
+  p.leaf_axial_twist_max_degrees = std::max(0.0f, SampleDistribution(leaf_axial_twist_max_degrees, rng));
+  p.leaf_axial_twist_frequency_ratio_min =
+      std::clamp(SampleDistribution(leaf_axial_twist_frequency_ratio_min, rng), 0.0f, 0.5f);
+  p.leaf_axial_twist_frequency_ratio_max = std::clamp(SampleDistribution(leaf_axial_twist_frequency_ratio_max, rng),
+                                                      p.leaf_axial_twist_frequency_ratio_min, 0.5f);
+  p.leaf_static_wind_azimuth_degrees = std::uniform_real_distribution<float>(0.0f, 360.0f)(rng);
+  p.leaf_gravity_droop_compliance = std::max(0.0f, SampleDistribution(leaf_gravity_droop_compliance, rng));
+  p.leaf_gravity_droop_age_response = leaf_gravity_droop_age_response;
+  p.leaf_flexural_stiffness_along_leaf = leaf_flexural_stiffness_along_leaf;
+  p.leaf_damage_severity = leaf_damage_severity;
   p.leaf_sheath_radius_ratio = std::clamp(SampleDistribution(leaf_sheath_radius_ratio, rng), 1.0f, 3.0f);
+  p.leaf_sheath_cross_section_ratio = std::clamp(SampleDistribution(leaf_sheath_cross_section_ratio, rng), 1.0f, 3.0f);
   p.leaf_sheath_wrap_angle = std::clamp(SampleDistribution(leaf_sheath_wrap_angle, rng), 180.0f, 540.0f);
   p.leaf_blade_stage1_length_ratio = std::clamp(SampleDistribution(leaf_blade_stage1_length_ratio, rng), 0.0f, 1.0f);
   p.leaf_blade_stage2_length_ratio = std::clamp(SampleDistribution(leaf_blade_stage2_length_ratio, rng), 0.0f, 1.0f);
@@ -439,6 +480,7 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.tiller_insertion_angle = tiller_insertion_angle;
   p.tiller_final_lean_angle = tiller_final_lean_angle;
   p.tiller_azimuth_jitter = tiller_azimuth_jitter;
+  p.tiller_same_side_splay_angle = std::clamp(SampleDistribution(tiller_same_side_splay_angle, rng), 0.0f, 45.0f);
   p.tiller_recovery_axis_fraction = tiller_recovery_axis_fraction;
   p.tiller_leaf_count_ratio = tiller_leaf_count_ratio;
   p.tiller_height_ratio = tiller_height_ratio;
@@ -703,6 +745,10 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= ImGui::DragFloat("Leaf Roughness", &leaf_material_roughness, 0.01f, 0.0f, 1.0f);
     changed |= ImGui::DragFloat("Leaf Metallic", &leaf_material_metallic, 0.01f, 0.0f, 1.0f);
     changed |= ImGui::DragFloat("Leaf Specular", &leaf_material_specular, 0.01f, 0.0f, 1.0f);
+    changed |= ImGui::DragFloat("Leaf Subsurface", &leaf_material_subsurface_factor, 0.01f, 0.0f, 1.0f);
+    changed |= ImGui::ColorEdit3("Subsurface Color", &leaf_material_subsurface_color.x);
+    changed |=
+        ImGui::DragFloat3("Subsurface Radius (m)", &leaf_material_subsurface_radius.x, 0.0001f, 0.0f, 0.02f, "%.4f");
     ImGui::TreePop();
   }
 
@@ -750,6 +796,7 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= total_phytomer_count.Draw("Total Phytomer Count", 0.5f);
     changed |= phyllotaxis_angle.Draw("Phyllotaxis Angle (deg)", 1.0f);
     changed |= branch_azimuth_offset.Draw("Branch Azimuth Offset (deg)", 0.5f);
+    changed |= main_culm_lean_angle.Draw("Main Culm Lean (deg)", 0.25f);
     ImGui::TreePop();
   }
 
@@ -777,6 +824,7 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= inspect_plotted_distribution("Blade Thickness (Rank, m)", leaf_blade_thickness);
     changed |= inspect_plotted_distribution("Sheath Thickness (Rank, m)", leaf_sheath_thickness);
     changed |= leaf_sheath_radius_ratio.Draw("Sheath Radius / Culm Radius", 0.01f);
+    changed |= leaf_sheath_cross_section_ratio.Draw("Sheath Cross-Section Ratio", 0.01f);
     changed |= leaf_sheath_wrap_angle.Draw("Sheath Wrap (deg)", 1.0f);
     changed |= ImGui::DragFloat("Leaf Width Scale", &leaf_width_scale, 0.01f, 0.05f, 3.0f);
     changed |= inspect_plotted_distribution("Insertion Angle (Rank)", leaf_insertion_angle);
@@ -784,7 +832,16 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= inspect_plotted_distribution("Leaf Curling / Opening (Rank, deg)", leaf_curling);
     changed |= inspect_plotted_distribution("Leaf Bending (Rank)", leaf_bending);
     changed |= inspect_plotted_distribution("Leaf Waviness (Rank)", leaf_waviness);
+    changed |= inspect_plotted_distribution("Leaf Waviness / Half Width (Rank)", leaf_waviness_width_fraction);
     changed |= leaf_waviness_frequency.Draw("Waviness Frequency", 0.1f);
+    changed |= leaf_waviness_wavelength_m.Draw("Waviness Wavelength (m)", 0.01f);
+    changed |= leaf_centerline_waviness_fraction.Draw("Centerline Waviness / Length", 0.001f);
+    changed |= leaf_static_wind_deflection_fraction.Draw("Static Wind Deflection / Length", 0.001f);
+    changed |= leaf_axial_twist_max_degrees.Draw("Axial Twist Maximum (deg)", 0.25f);
+    changed |= leaf_axial_twist_frequency_ratio_min.Draw("Axial Twist / Edge Frequency Minimum", 0.01f);
+    changed |= leaf_axial_twist_frequency_ratio_max.Draw("Axial Twist / Edge Frequency Maximum", 0.01f);
+    changed |= leaf_gravity_droop_compliance.Draw("Gravity Droop Compliance", 0.01f);
+    changed |= leaf_damage_severity.Draw("Leaf Edge Damage", 0.01f);
     ImGui::TreePop();
   }
 
@@ -810,6 +867,7 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= tiller_insertion_angle.Draw("Tiller Insertion Angle", 0.5f);
     changed |= tiller_final_lean_angle.Draw("Tiller Final Lean Angle", 0.25f);
     changed |= tiller_azimuth_jitter.Draw("Tiller Azimuth Jitter", 0.25f);
+    changed |= tiller_same_side_splay_angle.Draw("Same-Side Tiller Splay", 0.25f);
     changed |= ImGui::DragFloat("Recovery Axis Fraction", &tiller_recovery_axis_fraction, 0.01f, 0.05f, 1.0f);
     changed |= tiller_leaf_count_ratio.Draw("Tiller/Main Leaf Count Ratio", 0.01f);
     changed |= tiller_height_ratio.Draw("Tiller/Main Culm-Tip Height Ratio", 0.01f);
@@ -829,6 +887,7 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= lateral_bud_plastochron_scale.Draw("Lateral-Bud Plastochron Scale", 0.01f);
     changed |= maturity_initiation_coupling.Draw("Maturity->Initiation Coupling", 0.01f);
     changed |= reference_maturity_gdd.Draw("Reference Maturity GDD", 5.0f);
+    changed |= ImGui::Checkbox("Finalize Authored Snapshot", &finalize_snapshot_morphology);
     ImGui::TreePop();
   }
 
@@ -862,6 +921,8 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
              "Controls normalized blade opening/curling development over thermal age."},
             {"Leaf Bending", &leaf_bending_development_curve,
              "Controls normalized bending development over thermal age."},
+            {"Gravity Droop Age Response", &leaf_gravity_droop_age_response,
+             "Controls effective leaf compliance over normalized thermal age."},
         },
         ImGuiTreeNodeFlags_DefaultOpen);
 
@@ -880,6 +941,8 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
              "Profile multiplier of blade opening/curling from collar (x=0) to tip (x=1)."},
             {"Waviness Along Leaf", &waviness_along_leaf,
              "Profile of waviness amplitude from collar (x=0) to tip (x=1)."},
+            {"Flexural Stiffness Along Leaf", &leaf_flexural_stiffness_along_leaf,
+             "Relative longitudinal bending stiffness from blade base to tip."},
         },
         ImGuiTreeNodeFlags_DefaultOpen);
 
@@ -1034,6 +1097,7 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.total_phytomer_count.Save("total_phytomer_count", out);
   target.phyllotaxis_angle.Save("phyllotaxis_angle", out);
   target.branch_azimuth_offset.Save("branch_azimuth_offset", out);
+  target.main_culm_lean_angle.Save("main_culm_lean_angle", out);
 
   // Internode + leaf morphology.
   target.internode_length.Save("internode_length", out);
@@ -1054,7 +1118,19 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.leaf_bending.Save("leaf_bending", out);
   target.leaf_waviness.Save("leaf_waviness", out);
   target.leaf_waviness_frequency.Save("leaf_waviness_frequency", out);
+  target.leaf_waviness_width_fraction.Save("leaf_waviness_width_fraction", out);
+  target.leaf_waviness_wavelength_m.Save("leaf_waviness_wavelength_m", out);
+  target.leaf_centerline_waviness_fraction.Save("leaf_centerline_waviness_fraction", out);
+  target.leaf_static_wind_deflection_fraction.Save("leaf_static_wind_deflection_fraction", out);
+  target.leaf_axial_twist_max_degrees.Save("leaf_axial_twist_max_degrees", out);
+  target.leaf_axial_twist_frequency_ratio_min.Save("leaf_axial_twist_frequency_ratio_min", out);
+  target.leaf_axial_twist_frequency_ratio_max.Save("leaf_axial_twist_frequency_ratio_max", out);
+  target.leaf_gravity_droop_compliance.Save("leaf_gravity_droop_compliance", out);
+  target.leaf_gravity_droop_age_response.Save("leaf_gravity_droop_age_response", out);
+  target.leaf_flexural_stiffness_along_leaf.Save("leaf_flexural_stiffness_along_leaf", out);
+  target.leaf_damage_severity.Save("leaf_damage_severity", out);
   target.leaf_sheath_radius_ratio.Save("leaf_sheath_radius_ratio", out);
+  target.leaf_sheath_cross_section_ratio.Save("leaf_sheath_cross_section_ratio", out);
   target.leaf_sheath_wrap_angle.Save("leaf_sheath_wrap_angle", out);
   target.leaf_blade_stage1_length_ratio.Save("leaf_blade_stage1_length_ratio", out);
   target.leaf_blade_stage2_length_ratio.Save("leaf_blade_stage2_length_ratio", out);
@@ -1077,6 +1153,7 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.tiller_insertion_angle.Save("tiller_insertion_angle", out);
   target.tiller_final_lean_angle.Save("tiller_final_lean_angle", out);
   target.tiller_azimuth_jitter.Save("tiller_azimuth_jitter", out);
+  target.tiller_same_side_splay_angle.Save("tiller_same_side_splay_angle", out);
   out << YAML::Key << "tiller_recovery_axis_fraction" << YAML::Value << target.tiller_recovery_axis_fraction;
   target.tiller_leaf_count_ratio.Save("tiller_leaf_count_ratio", out);
   target.tiller_height_ratio.Save("tiller_height_ratio", out);
@@ -1094,6 +1171,7 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.lateral_bud_plastochron_scale.Save("lateral_bud_plastochron_scale", out);
   target.maturity_initiation_coupling.Save("maturity_initiation_coupling", out);
   target.reference_maturity_gdd.Save("reference_maturity_gdd", out);
+  out << YAML::Key << "finalize_snapshot_morphology" << YAML::Value << target.finalize_snapshot_morphology;
 
   // Growth curves.
   target.internode_elongation_curve.Save("internode_elongation_curve", out);
@@ -1131,6 +1209,9 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   out << YAML::Key << "leaf_material_roughness" << YAML::Value << target.leaf_material_roughness;
   out << YAML::Key << "leaf_material_metallic" << YAML::Value << target.leaf_material_metallic;
   out << YAML::Key << "leaf_material_specular" << YAML::Value << target.leaf_material_specular;
+  out << YAML::Key << "leaf_material_subsurface_factor" << YAML::Value << target.leaf_material_subsurface_factor;
+  out << YAML::Key << "leaf_material_subsurface_color" << YAML::Value << target.leaf_material_subsurface_color;
+  out << YAML::Key << "leaf_material_subsurface_radius" << YAML::Value << target.leaf_material_subsurface_radius;
 
   target.stem_albedo_texture.Save("stem_albedo_texture", out);
   target.stem_normal_texture.Save("stem_normal_texture", out);
@@ -1174,6 +1255,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& total_phytomer_count = target.total_phytomer_count;
   auto& phyllotaxis_angle = target.phyllotaxis_angle;
   auto& branch_azimuth_offset = target.branch_azimuth_offset;
+  auto& main_culm_lean_angle = target.main_culm_lean_angle;
   auto& internode_length = target.internode_length;
   auto& internode_thickness = target.internode_thickness;
   auto& leaf_blade_length = target.leaf_blade_length;
@@ -1192,7 +1274,19 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& leaf_bending = target.leaf_bending;
   auto& leaf_waviness = target.leaf_waviness;
   auto& leaf_waviness_frequency = target.leaf_waviness_frequency;
+  auto& leaf_waviness_width_fraction = target.leaf_waviness_width_fraction;
+  auto& leaf_waviness_wavelength_m = target.leaf_waviness_wavelength_m;
+  auto& leaf_centerline_waviness_fraction = target.leaf_centerline_waviness_fraction;
+  auto& leaf_static_wind_deflection_fraction = target.leaf_static_wind_deflection_fraction;
+  auto& leaf_axial_twist_max_degrees = target.leaf_axial_twist_max_degrees;
+  auto& leaf_axial_twist_frequency_ratio_min = target.leaf_axial_twist_frequency_ratio_min;
+  auto& leaf_axial_twist_frequency_ratio_max = target.leaf_axial_twist_frequency_ratio_max;
+  auto& leaf_gravity_droop_compliance = target.leaf_gravity_droop_compliance;
+  auto& leaf_gravity_droop_age_response = target.leaf_gravity_droop_age_response;
+  auto& leaf_flexural_stiffness_along_leaf = target.leaf_flexural_stiffness_along_leaf;
+  auto& leaf_damage_severity = target.leaf_damage_severity;
   auto& leaf_sheath_radius_ratio = target.leaf_sheath_radius_ratio;
+  auto& leaf_sheath_cross_section_ratio = target.leaf_sheath_cross_section_ratio;
   auto& leaf_sheath_wrap_angle = target.leaf_sheath_wrap_angle;
   auto& leaf_blade_stage1_length_ratio = target.leaf_blade_stage1_length_ratio;
   auto& leaf_blade_stage2_length_ratio = target.leaf_blade_stage2_length_ratio;
@@ -1212,6 +1306,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& tiller_insertion_angle = target.tiller_insertion_angle;
   auto& tiller_final_lean_angle = target.tiller_final_lean_angle;
   auto& tiller_azimuth_jitter = target.tiller_azimuth_jitter;
+  auto& tiller_same_side_splay_angle = target.tiller_same_side_splay_angle;
   auto& tiller_recovery_axis_fraction = target.tiller_recovery_axis_fraction;
   auto& tiller_leaf_count_ratio = target.tiller_leaf_count_ratio;
   auto& tiller_height_ratio = target.tiller_height_ratio;
@@ -1228,6 +1323,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& lateral_bud_plastochron_scale = target.lateral_bud_plastochron_scale;
   auto& maturity_initiation_coupling = target.maturity_initiation_coupling;
   auto& reference_maturity_gdd = target.reference_maturity_gdd;
+  auto& finalize_snapshot_morphology = target.finalize_snapshot_morphology;
   auto& internode_elongation_curve = target.internode_elongation_curve;
   auto& internode_thickness_curve = target.internode_thickness_curve;
   auto& leaf_sheath_length_growth_curve = target.leaf_sheath_length_growth_curve;
@@ -1260,6 +1356,9 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& leaf_material_roughness = target.leaf_material_roughness;
   auto& leaf_material_metallic = target.leaf_material_metallic;
   auto& leaf_material_specular = target.leaf_material_specular;
+  auto& leaf_material_subsurface_factor = target.leaf_material_subsurface_factor;
+  auto& leaf_material_subsurface_color = target.leaf_material_subsurface_color;
+  auto& leaf_material_subsurface_radius = target.leaf_material_subsurface_radius;
   auto& stem_albedo_texture = target.stem_albedo_texture;
   auto& stem_normal_texture = target.stem_normal_texture;
   auto& stem_roughness_texture = target.stem_roughness_texture;
@@ -1284,6 +1383,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   LoadSingleDistributionWithScalarFallback(in, "total_phytomer_count", total_phytomer_count);
   LoadSingleDistributionWithScalarFallback(in, "phyllotaxis_angle", phyllotaxis_angle);
   LoadSingleDistributionWithScalarFallback(in, "branch_azimuth_offset", branch_azimuth_offset);
+  LoadSingleDistributionWithScalarFallback(in, "main_culm_lean_angle", main_culm_lean_angle);
 
   internode_length.Load("internode_length", in);
   internode_thickness.Load("internode_thickness", in);
@@ -1307,7 +1407,30 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   leaf_bending.Load("leaf_bending", in);
   leaf_waviness.Load("leaf_waviness", in);
   LoadSingleDistributionWithScalarFallback(in, "leaf_waviness_frequency", leaf_waviness_frequency);
+  if (in["leaf_waviness_width_fraction"])
+    leaf_waviness_width_fraction.Load("leaf_waviness_width_fraction", in);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_waviness_wavelength_m", leaf_waviness_wavelength_m);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_centerline_waviness_fraction", leaf_centerline_waviness_fraction);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_static_wind_deflection_fraction",
+                                           leaf_static_wind_deflection_fraction);
+  if (in["leaf_axial_twist_max_degrees"])
+    LoadSingleDistributionWithScalarFallback(in, "leaf_axial_twist_max_degrees", leaf_axial_twist_max_degrees);
+  else
+    LoadSingleDistributionWithScalarFallback(in, "leaf_static_twist_degrees", leaf_axial_twist_max_degrees);
+  if (in["leaf_axial_twist_frequency_ratio_min"])
+    LoadSingleDistributionWithScalarFallback(in, "leaf_axial_twist_frequency_ratio_min",
+                                             leaf_axial_twist_frequency_ratio_min);
+  if (in["leaf_axial_twist_frequency_ratio_max"])
+    LoadSingleDistributionWithScalarFallback(in, "leaf_axial_twist_frequency_ratio_max",
+                                             leaf_axial_twist_frequency_ratio_max);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_gravity_droop_compliance", leaf_gravity_droop_compliance);
+  if (in["leaf_gravity_droop_age_response"])
+    leaf_gravity_droop_age_response.Load("leaf_gravity_droop_age_response", in);
+  if (in["leaf_flexural_stiffness_along_leaf"])
+    leaf_flexural_stiffness_along_leaf.Load("leaf_flexural_stiffness_along_leaf", in);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_damage_severity", leaf_damage_severity);
   LoadSingleDistributionWithScalarFallback(in, "leaf_sheath_radius_ratio", leaf_sheath_radius_ratio);
+  LoadSingleDistributionWithScalarFallback(in, "leaf_sheath_cross_section_ratio", leaf_sheath_cross_section_ratio);
   LoadSingleDistributionWithScalarFallback(in, "leaf_sheath_wrap_angle", leaf_sheath_wrap_angle);
   LoadSingleDistributionWithScalarFallback(in, "leaf_blade_stage1_length_ratio", leaf_blade_stage1_length_ratio);
   LoadSingleDistributionWithScalarFallback(in, "leaf_blade_stage2_length_ratio", leaf_blade_stage2_length_ratio);
@@ -1344,6 +1467,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   LoadSingleDistributionWithScalarFallback(in, "tiller_insertion_angle", tiller_insertion_angle);
   LoadSingleDistributionWithScalarFallback(in, "tiller_final_lean_angle", tiller_final_lean_angle);
   LoadSingleDistributionWithScalarFallback(in, "tiller_azimuth_jitter", tiller_azimuth_jitter);
+  LoadSingleDistributionWithScalarFallback(in, "tiller_same_side_splay_angle", tiller_same_side_splay_angle);
   if (in["tiller_recovery_axis_fraction"]) {
     tiller_recovery_axis_fraction = in["tiller_recovery_axis_fraction"].as<float>();
   }
@@ -1368,6 +1492,9 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   LoadSingleDistributionWithScalarFallback(in, "lateral_bud_plastochron_scale", lateral_bud_plastochron_scale);
   LoadSingleDistributionWithScalarFallback(in, "maturity_initiation_coupling", maturity_initiation_coupling);
   LoadSingleDistributionWithScalarFallback(in, "reference_maturity_gdd", reference_maturity_gdd);
+  if (in["finalize_snapshot_morphology"]) {
+    finalize_snapshot_morphology = in["finalize_snapshot_morphology"].as<bool>();
+  }
 
   LoadGrowthCurveWithLegacyFallback(in, "internode_elongation_curve", internode_elongation_curve);
   LoadGrowthCurveWithLegacyFallback(in, "internode_thickness_curve", internode_thickness_curve);
@@ -1425,6 +1552,12 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
     leaf_material_metallic = in["leaf_material_metallic"].as<float>();
   if (in["leaf_material_specular"])
     leaf_material_specular = in["leaf_material_specular"].as<float>();
+  if (in["leaf_material_subsurface_factor"])
+    leaf_material_subsurface_factor = in["leaf_material_subsurface_factor"].as<float>();
+  if (in["leaf_material_subsurface_color"])
+    leaf_material_subsurface_color = in["leaf_material_subsurface_color"].as<glm::vec3>();
+  if (in["leaf_material_subsurface_radius"])
+    leaf_material_subsurface_radius = in["leaf_material_subsurface_radius"].as<glm::vec3>();
 
   stem_albedo_texture.Load("stem_albedo_texture", in);
   stem_normal_texture.Load("stem_normal_texture", in);
@@ -1505,6 +1638,7 @@ void SorghumLSDescriptor::RegisterExplorableAxes(ParamSpaceExplorer& explorer) {
   explorer.AddSingle("total_phytomer_count", "TPC", d.total_phytomer_count, 1.0f, 128.0f, 64.0f);
   explorer.AddSingle("phyllotaxis_angle", "PHA", d.phyllotaxis_angle, 0.0f, 360.0f, 180.0f);
   explorer.AddSingle("branch_azimuth_offset", "BAO", d.branch_azimuth_offset, -180.0f, 180.0f, 180.0f);
+  explorer.AddSingle("main_culm_lean_angle", "MCL", d.main_culm_lean_angle, 0.0f, 30.0f, 20.0f);
 
   explorer.AddPlotted("internode_length", "INL", d.internode_length);
   explorer.AddPlotted("internode_thickness", "INT", d.internode_thickness);
@@ -1522,6 +1656,22 @@ void SorghumLSDescriptor::RegisterExplorableAxes(ParamSpaceExplorer& explorer) {
   explorer.AddPlotted("leaf_bending", "LBN", d.leaf_bending);
   explorer.AddPlotted("leaf_waviness", "LWA", d.leaf_waviness);
   explorer.AddSingle("leaf_waviness_frequency", "LWF", d.leaf_waviness_frequency, 0.0f, 100.0f, 50.0f);
+  explorer.AddPlotted("leaf_waviness_width_fraction", "LWR", d.leaf_waviness_width_fraction);
+  explorer.AddSingle("leaf_waviness_wavelength_m", "LWW", d.leaf_waviness_wavelength_m, 0.0f, 5.0f, 2.5f);
+  explorer.AddSingle("leaf_centerline_waviness_fraction", "LCW", d.leaf_centerline_waviness_fraction, 0.0f, 0.1f,
+                     0.05f);
+  explorer.AddSingle("leaf_static_wind_deflection_fraction", "LWD", d.leaf_static_wind_deflection_fraction, 0.0f, 0.2f,
+                     0.1f);
+  explorer.AddSingle("leaf_axial_twist_max_degrees", "LTA", d.leaf_axial_twist_max_degrees, 0.0f, 45.0f, 30.0f);
+  explorer.AddSingle("leaf_axial_twist_frequency_ratio_min", "LTF0", d.leaf_axial_twist_frequency_ratio_min, 0.0f, 0.5f,
+                     0.5f);
+  explorer.AddSingle("leaf_axial_twist_frequency_ratio_max", "LTF1", d.leaf_axial_twist_frequency_ratio_max, 0.0f, 0.5f,
+                     0.5f);
+  explorer.AddSingle("leaf_gravity_droop_compliance", "LGC", d.leaf_gravity_droop_compliance, 0.0f, 5.0f, 2.5f);
+  explorer.AddPlotted("leaf_gravity_droop_age_response", "LGA", d.leaf_gravity_droop_age_response);
+  explorer.AddPlotted("leaf_flexural_stiffness_along_leaf", "LFS", d.leaf_flexural_stiffness_along_leaf);
+  explorer.AddSingle("leaf_damage_severity", "LDS", d.leaf_damage_severity, 0.0f, 1.0f, 0.5f);
+  explorer.AddSingle("leaf_sheath_cross_section_ratio", "LSC", d.leaf_sheath_cross_section_ratio, 1.0f, 3.0f, 1.0f);
 
   explorer.AddSingle("leaf_lifespan_years", "LLY", d.leaf_lifespan_years, 0.1f, 8.0f, 4.0f);
   explorer.AddSingle("leaf_wilting_years", "LWY", d.leaf_wilting_years, 0.05f, 8.0f, 4.0f);
@@ -1530,6 +1680,7 @@ void SorghumLSDescriptor::RegisterExplorableAxes(ParamSpaceExplorer& explorer) {
   explorer.AddSingle("tiller_insertion_angle", "TIA", d.tiller_insertion_angle, 0.0f, 120.0f, 60.0f);
   explorer.AddSingle("tiller_final_lean_angle", "TFL", d.tiller_final_lean_angle, -30.0f, 30.0f, 30.0f);
   explorer.AddSingle("tiller_azimuth_jitter", "TAJ", d.tiller_azimuth_jitter, -45.0f, 45.0f, 45.0f);
+  explorer.AddSingle("tiller_same_side_splay_angle", "TSA", d.tiller_same_side_splay_angle, 0.0f, 45.0f, 20.0f);
   explorer.AddSingle("tiller_leaf_count_ratio", "TLR", d.tiller_leaf_count_ratio, 0.5f, 1.1f, 0.3f);
   explorer.AddSingle("tiller_height_ratio", "THR", d.tiller_height_ratio, 0.5f, 1.1f, 0.3f);
   explorer.AddPlotted("tiller_leaf_area_ratio_by_origin", "TAR", d.tiller_leaf_area_ratio_by_origin);

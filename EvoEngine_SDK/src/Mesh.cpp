@@ -97,14 +97,16 @@ void Mesh::OnCreate() {
 }
 
 Mesh::~Mesh() {
-  GeometryStorage::FreeMesh(GetHandle());
+  if (render_geometry_allocated_) {
+    GeometryStorage::FreeMesh(GetHandle());
+  }
   triangle_range_.reset();
   meshlet_range_.reset();
 }
 
 void Mesh::DrawIndexed(VkCommandBuffer vk_command_buffer, GraphicsPipelineStates& global_pipeline_state,
                        const int instances_count) const {
-  if (instances_count == 0)
+  if (instances_count == 0 || !render_geometry_current_)
     return;
   global_pipeline_state.ApplyAllStates(vk_command_buffer);
   Platform::DrawIndexed(vk_command_buffer, triangle_range_->prev_frame_index_count * 3, instances_count,
@@ -124,11 +126,22 @@ void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vec
 }
 
 void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vector<Vertex>& vertices,
-                       const std::vector<glm::uvec3>& triangles) {
+                       const std::vector<glm::uvec3>& triangles, const bool update_render_geometry) {
   if (vertices.empty() || triangles.empty()) {
 #ifndef NDEBUG
     EVOENGINE_LOG("Vertices or triangles empty!");
 #endif
+    if (update_render_geometry && render_geometry_allocated_) {
+      GeometryStorage::FreeMesh(GetHandle());
+      render_geometry_allocated_ = false;
+    }
+    vertices_.clear();
+    triangles_.clear();
+    bound_ = Bound();
+    blas_.reset();
+    render_geometry_current_ = false;
+    version_++;
+    saved_ = false;
     return;
   }
 
@@ -148,13 +161,15 @@ void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vec
     t_c.emplace_back(triangle);
   }
   if (t_c.empty()) {
-    if (version_ != 0) {
+    if (update_render_geometry && render_geometry_allocated_) {
       GeometryStorage::FreeMesh(GetHandle());
+      render_geometry_allocated_ = false;
     }
     vertices_.clear();
     triangles_.clear();
     bound_ = Bound();
     blas_.reset();
+    render_geometry_current_ = false;
     version_++;
     saved_ = false;
     return;
@@ -194,7 +209,17 @@ void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vec
 
   // MergeVertices();
 
-  if (version_ != 0 && !compact_storage_on_update &&
+  if (!update_render_geometry) {
+    vertices_ = std::move(v_c);
+    triangles_ = std::move(t_c);
+    blas_.reset();
+    render_geometry_current_ = false;
+    version_++;
+    saved_ = false;
+    return;
+  }
+
+  if (render_geometry_allocated_ && !compact_storage_on_update &&
       GeometryStorage::TryUpdateMesh(GetHandle(), v_c, t_c, meshlet_range_, triangle_range_, optimize_meshlet_layout)) {
     vertices_ = std::move(v_c);
     triangles_ = std::move(t_c);
@@ -205,20 +230,23 @@ void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vec
     } else {
       blas_.reset();
     }
+    render_geometry_current_ = true;
     saved_ = false;
     return;
   }
 
-  if (version_ != 0) {
+  if (render_geometry_allocated_) {
     if (compact_storage_on_update) {
       GeometryStorage::FreeMesh(GetHandle());
     } else {
       GeometryStorage::OrphanMesh(GetHandle());
     }
+    render_geometry_allocated_ = false;
   }
 
   GeometryStorage::AllocateMesh(GetHandle(), v_c, t_c, meshlet_range_, triangle_range_, !compact_storage_on_update,
                                 optimize_meshlet_layout);
+  render_geometry_allocated_ = true;
 
   vertices_ = std::move(v_c);
   triangles_ = std::move(t_c);
@@ -229,6 +257,7 @@ void Mesh::SetVertices(const VertexAttributes& vertex_attributes, const std::vec
     blas_.reset();
   }
 
+  render_geometry_current_ = true;
   saved_ = false;
 }
 

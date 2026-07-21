@@ -293,10 +293,14 @@ struct RayTracedGeometry {
   CudaBuffer accelerated_structure_buffer;
   size_t version = -1;
   uint64_t handle = 0;
+  size_t gas_vertex_count = 0;
+  size_t gas_primitive_count = 0;
+  uint64_t gas_topology_hash = 0;
+  bool gas_allows_update = false;
   bool update_flag = false;
   bool remove_flag = true;
 
-  void BuildGas(const OptixDeviceContext& context);
+  bool BuildGas(const OptixDeviceContext& context);
 
   void UploadForSbt();
 
@@ -348,6 +352,10 @@ class OptiXRayTracer {
   std::unordered_map<uint64_t, RayTracedMaterial> materials;
   std::unordered_map<uint64_t, RayTracedGeometry> geometries;
   std::unordered_map<uint64_t, RayTracedInstance> instances;
+  uint64_t gas_build_count = 0;
+  uint64_t gas_update_count = 0;
+  uint64_t ias_build_count = 0;
+  uint64_t ias_update_count = 0;
 
   // ------------------------------------------------------------------
   // internal helper functions
@@ -439,6 +447,8 @@ class OptiXRayTracer {
   bool has_acceleration_structure_ = false;
   //! buffer that keeps the (final, compacted) acceleration structure
   CudaBuffer ias_buffer_;
+  OptixTraversableHandle ias_handle_ = 0;
+  size_t ias_instance_count_ = 0;
 #pragma endregion
 
   friend class RayTracerCamera;

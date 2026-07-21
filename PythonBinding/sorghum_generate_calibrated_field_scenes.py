@@ -259,15 +259,17 @@ def promote_staged_scene(project_root: Path, staged: Path, target: Path) -> None
     assets_root = project_root / "Assets"
     staged_files = scene_files(assets_root, staged)
     target_files = scene_files(assets_root, target)
+    metadata_temp = target_files[1].with_name(f".{target_files[1].name}.{uuid.uuid4().hex}.tmp")
     if not staged_files[0].exists():
         raise RuntimeError(f"staged scene was not created: {staged}")
     previous = {path: path.read_bytes() if path.exists() else None for path in target_files}
     try:
-        os.replace(staged_files[0], target_files[0])
         if staged_files[1].exists():
             metadata = staged_files[1].read_text(encoding="utf-8").replace(staged.stem, target.stem)
-            staged_files[1].write_text(metadata, encoding="utf-8")
-            os.replace(staged_files[1], target_files[1])
+            metadata_temp.write_text(metadata, encoding="utf-8")
+        os.replace(staged_files[0], target_files[0])
+        if staged_files[1].exists():
+            os.replace(metadata_temp, target_files[1])
         elif target_files[1].exists():
             target_files[1].unlink()
     except Exception:
@@ -278,6 +280,7 @@ def promote_staged_scene(project_root: Path, staged: Path, target: Path) -> None
                 path.write_bytes(content)
         raise
     finally:
+        metadata_temp.unlink(missing_ok=True)
         discard_staged_scene(project_root, staged)
 
 
@@ -352,6 +355,9 @@ def generate_4x10_scene(
             instantiated = int(evo.InstantiateSorghumLsPlantsFromPlantingMarkers())
             if instantiated != 40:
                 raise RuntimeError(f"{date}: expected 40 instantiated planting markers, got {instantiated}")
+            conformed = int(evo.ConformSorghumLsPlantsToGroundMesh())
+            if conformed != 40:
+                raise RuntimeError(f"{date}: expected 40 plants conformed to the ground surface, got {conformed}")
             source_records = [
                 record
                 for record in evo.GetSorghumLsPlantSceneMetadata(False)
@@ -644,9 +650,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=repo_root)
     parser.add_argument("--build-dir", type=Path, default=repo_root / "out" / "build" / "vs2026-x64")
-    parser.add_argument("--config", default="RelWithDebInfo")
+    parser.add_argument("--config", default="Release")
     parser.add_argument("--project-root", type=Path, default=project_root)
-    parser.add_argument("--runtime-package-dir", type=Path, default=repo_root / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "RelWithDebInfo" / "Packages")
+    parser.add_argument("--runtime-package-dir", type=Path, default=repo_root / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "Release" / "Packages")
     parser.add_argument("--manifest", type=Path, default=project_root / "Assets" / GENERATED_REPORT_ROOT / "field_manifest.csv")
     parser.add_argument("--calibrated-descriptor-root", type=Path, default=GENERATED_DESCRIPTOR_ROOT)
     parser.add_argument("--reference-4x10-scene", type=Path, default=Path(FOUR_BY_TEN_REFERENCE_SCENE))
@@ -735,8 +741,6 @@ def run_worker_processes(args: argparse.Namespace, dates: list[str]) -> tuple[li
         scene_path = args.project_root / "Assets" / TEN_BY_TEN_TARGET_SCENE
         if not scene_path.exists():
             raise RuntimeError(f"10x10 worker failed with exit code {result.returncode}")
-        if result.returncode != 0:
-            print(f"10x10 worker exited during engine shutdown ({result.returncode}); saved scene verified")
         generated.append(Path(TEN_BY_TEN_TARGET_SCENE))
     return generated, metadata_rows
 

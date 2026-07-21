@@ -1,6 +1,7 @@
 #pragma once
 
 #include "LSystemComponentBase.hpp"
+#include "SorghumGeometrySnapshot.hpp"
 #include "SorghumGrowthModel.hpp"
 #include "SorghumLeafMesh.hpp"
 
@@ -45,15 +46,23 @@ class SorghumLS final : public LSystemComponentBase<SorghumLS> {
   uint32_t last_live_leaf_count = 0;
   uint32_t last_invalid_instance_count = 0;
 
-  float GetInfancyTargetGDD() const { return 0.0f; }
+  float GetInfancyTargetGDD() const {
+    return 0.0f;
+  }
 
-  void GenerateGeometryEntities(bool uncapped_growth = false);
+  void GenerateGeometryEntities(bool uncapped_growth = false, bool reuse_geometry_entities = false);
+  [[nodiscard]] std::shared_ptr<const SorghumGeometrySnapshot> GenerateGeometrySnapshot(bool uncapped_growth = false,
+                                                                                        uint32_t max_growth_steps = 0);
   void GeneratePreviewGeometryEntities(float preview_target_gdd, uint32_t preview_max_growth_steps);
   void GrowToTargetGDD(bool uncapped_growth = false, uint32_t max_growth_steps = 0);
   void SetSeasonalChronologicalMode(bool enable_independent_chronological_clock);
   bool AdvanceChronologicalAging(float delta_years);
+  [[nodiscard]] std::shared_ptr<const SorghumGeometrySnapshot> BuildGeometrySnapshot();
+  void PublishGeometrySnapshot(const std::shared_ptr<const SorghumGeometrySnapshot>& snapshot,
+                               bool update_render_geometry = true);
   void RebuildGeometry();
   void ClearGeometryEntities() const;
+  [[nodiscard]] const std::shared_ptr<const SorghumGeometrySnapshot>& GetGeometrySnapshot() const;
   void ExportObj(const std::filesystem::path& path) const;
   void ExportFlowGraph(YAML::Emitter& out);
   void ExportFlowGraph(const std::filesystem::path& path);
@@ -63,6 +72,10 @@ class SorghumLS final : public LSystemComponentBase<SorghumLS> {
   void Start() override;
   void OnDestroy() override;
   void CollectAssetRef(std::vector<AssetRef>& list);
+
+ private:
+  mutable std::shared_ptr<const SorghumGeometrySnapshot> geometry_snapshot_;
+  uint64_t geometry_version_ = 0;
 };
 
 }  // namespace l_system_package
