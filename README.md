@@ -145,24 +145,25 @@ Recalibrate all ten descriptors at the paper-validation sample sizes before scen
 
 ```bat
 python PythonBinding\sorghum_lsystem_calibrate_date_cultivar_descriptors.py --iteration-sample-count 1000 --validation-sample-count 10000 --max-iterations 6 --single-process
-python PythonBinding\sorghum_migrate_fidelity_v4_descriptors.py
 python PythonBinding\sorghum_generate_calibrated_field_scenes.py
 ```
 
 These commands use the Release runtime by default. Single-process descriptor calibration avoids concurrent CUDA and
 asset-metadata access on Windows. The 2021 main-culm leaf-count and complete-plant height distributions are mandatory
 fit targets.
-The ten generated date/cultivar descriptors are measured-date snapshots finalized at their stage-specific GDD, so
-their saved geometry matches those calibration targets. The shared L-system remains time-resolved for future
-dynamic-growth work when snapshot finalization is disabled.
+The ten generated date/cultivar descriptors are measured-date snapshots finalized at their stage-specific GDD. Use
+the generated calibration and scene-validation reports as the authority for current measurement agreement. The
+shared L-system remains time-resolved for future dynamic-growth work when snapshot finalization is disabled.
 
 The promoted descriptors use crown-attached primary tillers with distichous leaf-axil origins and restrained same-side
 crown splay, absolute rank-specific blade widths,
 descriptor-owned blade/sheath thickness, stem-fitted overlapping sheaths, a reduced static gravity response driven by
 leaf thermal age and along-blade stiffness, deterministic plant-coherent wind deflection and twist, multi-scale
 centerline and margin waviness, the promoted 3x3 leaf atlas, constrained rank/age color and damage variation,
-elliptical sheaths, main-culm lean, and a continuous textured culm mesh. The first three stages use 50% wider blades
-without changing their authored physical thicknesses.
+elliptical sheaths, main-culm lean, and a continuous textured culm mesh. Growth stages 2 through 5 use 25% wider
+maximum blades without changing their authored physical thicknesses. The distal blade droop is increased by 50%,
+and independent leaf-roll and tiller-azimuth variation are doubled. BTX
+uses the more upright `26.25 +/- 3.75` degree tiller insertion distribution; Pawaga retains `35 +/- 5` degrees.
 
 The manual soil mesh carries baked geometric relief derived from its PBR height map, so the EvoEngine RT review uses
 real geometry rather than a raster-only displacement approximation. Rebuild that mesh after replacing the manual PBR

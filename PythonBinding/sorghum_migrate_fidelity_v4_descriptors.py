@@ -14,10 +14,10 @@ MANUAL = ASSETS / "ManualAssets" / "Descriptors"
 
 STAGES = {
     "GrowthStage01": (0.0120, 0.0800, 0.00030, 0.00015),
-    "GrowthStage02": (0.0135, 0.0950, 0.00035, 0.00020),
-    "GrowthStage03": (0.0150, 0.1100, 0.00045, 0.00030),
-    "GrowthStage04": (0.0165, 0.1260, 0.00050, 0.00040),
-    "GrowthStage05": (0.0165, 0.1260, 0.00045, 0.00045),
+    "GrowthStage02": (0.0135, 0.11875, 0.00035, 0.00020),
+    "GrowthStage03": (0.0150, 0.13750, 0.00045, 0.00030),
+    "GrowthStage04": (0.0165, 0.15750, 0.00050, 0.00040),
+    "GrowthStage05": (0.0165, 0.15750, 0.00045, 0.00045),
 }
 
 LEAF_MAX_LENGTH_M = {
@@ -32,6 +32,11 @@ PLASTOCHRON_GDD = 30.0
 MATURITY_GDD = 240.0
 LATERAL_AXIS_PLASTOCHRON_SCALE = 0.6
 TILLER_SAME_SIDE_SPLAY_DEGREES = 12.0
+BTX_TILLER_BRANCHING_SCALE = 0.75
+SECOND_HALF_BLADE_DROOP_SCALE = 1.5
+PHYLLOTACTIC_VARIATION_SCALE = 2.0
+LEAF_ROLL_DEVIATION_DEGREES = 8.0 * PHYLLOTACTIC_VARIATION_SCALE
+TILLER_AZIMUTH_JITTER_DEGREES = 10.0 * PHYLLOTACTIC_VARIATION_SCALE
 TARGET_GDD_BY_STAGE = {
     "GrowthStage01": 512.0,
     "GrowthStage02": 580.0,
@@ -71,16 +76,92 @@ LEAF_WIDTH_RANK_PROFILE = [
 
 LEAF_PROFILES = {
     "BTX": {
-        "insertion": (0.0, 42.0, [(0.0, 0.65), (0.2, 0.57), (0.4, 0.47), (0.6, 0.34), (0.78, 0.20), (0.9, 0.08), (1.0, 0.0)], 5.0),
-        "bending": (0.0, 150.0, [(0.0, 0.75), (0.2, 0.72), (0.45, 0.65), (0.68, 0.50), (0.86, 0.18), (1.0, 0.0)], 15.0),
-        "bending_along": [(0.0, 0.0), (0.3, 0.0), (0.5, 0.015), (0.7, 0.18), (0.88, 0.60), (1.0, 1.0)],
+        "insertion": (
+            0.0,
+            42.0,
+            [
+                (0.0, 0.65),
+                (0.2, 0.57),
+                (0.4, 0.47),
+                (0.6, 0.34),
+                (0.78, 0.20),
+                (0.9, 0.08),
+                (1.0, 0.0),
+            ],
+            5.0,
+        ),
+        "bending": (
+            0.0,
+            150.0,
+            [
+                (0.0, 0.75),
+                (0.2, 0.72),
+                (0.45, 0.65),
+                (0.68, 0.50),
+                (0.86, 0.18),
+                (1.0, 0.0),
+            ],
+            15.0,
+        ),
+        "bending_along": [
+            (0.0, 0.0),
+            (0.3, 0.0),
+            (0.5, 0.015),
+            (0.7, 0.18),
+            (0.88, 0.60),
+            (1.0, 1.0),
+        ],
     },
     "Pawaga": {
-        "insertion": (0.0, 70.0, [(0.0, 0.82), (0.2, 0.78), (0.4, 0.67), (0.6, 0.52), (0.78, 0.34), (0.9, 0.14), (1.0, 0.0)], 8.0),
-        "bending": (0.0, 100.0, [(0.0, 0.65), (0.2, 0.68), (0.45, 0.62), (0.68, 0.48), (0.86, 0.25), (1.0, 0.0)], 16.0),
-        "bending_along": [(0.0, 0.0), (0.3, 0.0), (0.5, 0.026), (0.7, 0.20), (0.88, 0.62), (1.0, 1.0)],
+        "insertion": (
+            0.0,
+            70.0,
+            [
+                (0.0, 0.82),
+                (0.2, 0.78),
+                (0.4, 0.67),
+                (0.6, 0.52),
+                (0.78, 0.34),
+                (0.9, 0.14),
+                (1.0, 0.0),
+            ],
+            8.0,
+        ),
+        "bending": (
+            0.0,
+            100.0,
+            [
+                (0.0, 0.65),
+                (0.2, 0.68),
+                (0.45, 0.62),
+                (0.68, 0.48),
+                (0.86, 0.25),
+                (1.0, 0.0),
+            ],
+            16.0,
+        ),
+        "bending_along": [
+            (0.0, 0.0),
+            (0.3, 0.0),
+            (0.5, 0.026),
+            (0.7, 0.20),
+            (0.88, 0.62),
+            (1.0, 1.0),
+        ],
     },
 }
+
+
+def blade_droop_profile(cultivar: str) -> list[tuple[float, float]]:
+    return [
+        (
+            position,
+            min(
+                1.0, value * (SECOND_HALF_BLADE_DROOP_SCALE if position >= 0.5 else 1.0)
+            ),
+        )
+        for position, value in LEAF_PROFILES[cultivar]["bending_along"]
+    ]
 
 
 def plotted(name: str, value: float) -> str:
@@ -182,7 +263,9 @@ def replace_block(text: str, name: str, replacement: str) -> str:
 
 
 def insert_after(text: str, name: str, addition: str) -> str:
-    pattern = re.compile(rf"(?ms)^{re.escape(name)}:\n.*?(?=^[A-Za-z_][A-Za-z0-9_]*:|\Z)")
+    pattern = re.compile(
+        rf"(?ms)^{re.escape(name)}:\n.*?(?=^[A-Za-z_][A-Za-z0-9_]*:|\Z)"
+    )
     match = pattern.search(text)
     if not match:
         match = re.search(rf"(?m)^{re.escape(name)}:.*\n", text)
@@ -192,7 +275,11 @@ def insert_after(text: str, name: str, addition: str) -> str:
 
 
 def upsert_after(text: str, name: str, field: str, block: str) -> str:
-    return replace_block(text, field, block) if re.search(rf"(?m)^{re.escape(field)}:", text) else insert_after(text, name, block)
+    return (
+        replace_block(text, field, block)
+        if re.search(rf"(?m)^{re.escape(field)}:", text)
+        else insert_after(text, name, block)
+    )
 
 
 def scalar(text: str, name: str, value: str, after: str) -> str:
@@ -203,7 +290,7 @@ def scalar(text: str, name: str, value: str, after: str) -> str:
 
 
 def asset_ref(name: str, handle: int) -> str:
-    return f'{name}:\n  asset_handle_: {handle}\n  type_name_: Texture2D\n'
+    return f"{name}:\n  asset_handle_: {handle}\n  type_name_: Texture2D\n"
 
 
 def migrate(
@@ -215,10 +302,16 @@ def migrate(
     leaf_length_deviation_scale: float = 1.0,
 ) -> None:
     diameter, blade_width, blade_thickness, sheath_thickness = values
-    stage = stage or next(name for name, stage_values in STAGES.items() if stage_values == values)
+    stage = stage or next(
+        name for name, stage_values in STAGES.items() if stage_values == values
+    )
     cultivar = path.stem
     text = path.read_text(encoding="utf-8")
-    text = replace_block(text, "internode_thickness", tapered_plotted("internode_thickness", diameter, diameter * 0.8))
+    text = replace_block(
+        text,
+        "internode_thickness",
+        tapered_plotted("internode_thickness", diameter, diameter * 0.8),
+    )
     blade_length = LEAF_MAX_LENGTH_M[stage][cultivar] * leaf_length_mean_scale
     text = replace_block(
         text,
@@ -250,11 +343,34 @@ def migrate(
         "leaf_blade_thickness",
         plotted("leaf_blade_thickness", blade_thickness),
     )
-    text = upsert_after(text, "leaf_blade_thickness", "leaf_sheath_thickness", plotted("leaf_sheath_thickness", sheath_thickness))
+    text = upsert_after(
+        text,
+        "leaf_blade_thickness",
+        "leaf_sheath_thickness",
+        plotted("leaf_sheath_thickness", sheath_thickness),
+    )
     text = re.sub(r"(?m)^leaf_width_scale:.*$", "leaf_width_scale: 1", text)
     profile = LEAF_PROFILES[cultivar]
-    text = replace_block(text, "leaf_insertion_angle", curve_plotted("leaf_insertion_angle", *profile["insertion"]))
-    text = replace_block(text, "leaf_bending", curve_plotted("leaf_bending", *profile["bending"]))
+    text = replace_block(
+        text,
+        "leaf_insertion_angle",
+        curve_plotted("leaf_insertion_angle", *profile["insertion"]),
+    )
+    text = replace_block(
+        text,
+        "leaf_roll_angle",
+        curve_plotted(
+            "leaf_roll_angle",
+            -1.0,
+            1.0,
+            [(0.0, 0.502), (1.0, 0.503)],
+            LEAF_ROLL_DEVIATION_DEGREES,
+            [(0.0, 0.745), (1.0, 1.0)],
+        ),
+    )
+    text = replace_block(
+        text, "leaf_bending", curve_plotted("leaf_bending", *profile["bending"])
+    )
     text = replace_block(
         text,
         "leaf_waviness",
@@ -267,7 +383,9 @@ def migrate(
             [(0.0, 0.5), (1.0, 0.5)],
         ),
     )
-    text = replace_block(text, "leaf_waviness_frequency", single("leaf_waviness_frequency", 3.0, 0.75))
+    text = replace_block(
+        text, "leaf_waviness_frequency", single("leaf_waviness_frequency", 3.0, 0.75)
+    )
     text = upsert_after(
         text,
         "leaf_waviness_frequency",
@@ -281,7 +399,12 @@ def migrate(
             [(0.0, 0.5), (1.0, 0.5)],
         ),
     )
-    text = upsert_after(text, "leaf_waviness_width_fraction", "leaf_waviness_wavelength_m", single("leaf_waviness_wavelength_m", 0.16, 0.02))
+    text = upsert_after(
+        text,
+        "leaf_waviness_width_fraction",
+        "leaf_waviness_wavelength_m",
+        single("leaf_waviness_wavelength_m", 0.16, 0.02),
+    )
     text = upsert_after(
         text,
         "leaf_waviness_wavelength_m",
@@ -336,9 +459,9 @@ def migrate(
     text = upsert_after(
         text,
         "leaf_gravity_droop_age_response",
+        "leaf_flexural_stiffness_along_leaf",
+        curve_plotted(
             "leaf_flexural_stiffness_along_leaf",
-            curve_plotted(
-                "leaf_flexural_stiffness_along_leaf",
             0.02,
             1.0,
             [(0.0, 1.0), (0.3, 0.90), (0.6, 0.60), (0.82, 0.30), (1.0, 0.0)],
@@ -353,14 +476,21 @@ def migrate(
         "leaf_damage_severity",
         single("leaf_damage_severity", damage_mean, damage_deviation),
     )
-    text = replace_block(text, "leaf_sheath_radius_ratio", single("leaf_sheath_radius_ratio", 1.05))
+    text = replace_block(
+        text, "leaf_sheath_radius_ratio", single("leaf_sheath_radius_ratio", 1.05)
+    )
     text = upsert_after(
         text,
         "leaf_sheath_radius_ratio",
         "leaf_sheath_cross_section_ratio",
         single("leaf_sheath_cross_section_ratio", 1.40, 0.08),
     )
-    text = upsert_after(text, "leaf_sheath_radius_ratio", "leaf_sheath_wrap_angle", single("leaf_sheath_wrap_angle", 390.0))
+    text = upsert_after(
+        text,
+        "leaf_sheath_radius_ratio",
+        "leaf_sheath_wrap_angle",
+        single("leaf_sheath_wrap_angle", 390.0),
+    )
     text = upsert_after(
         text,
         "branch_azimuth_offset",
@@ -368,8 +498,24 @@ def migrate(
         single("main_culm_lean_angle", 6.8, 4.0),
     )
     text = re.sub(r"(?m)^tiller_model_version:.*$", "tiller_model_version: 4", text)
-    text = replace_block(text, "tiller_final_lean_angle", single("tiller_final_lean_angle", 10.0, 4.0))
-    text = replace_block(text, "tiller_azimuth_jitter", single("tiller_azimuth_jitter", 0.0, 10.0))
+    tiller_branching_scale = BTX_TILLER_BRANCHING_SCALE if cultivar == "BTX" else 1.0
+    text = replace_block(
+        text,
+        "tiller_insertion_angle",
+        single(
+            "tiller_insertion_angle",
+            35.0 * tiller_branching_scale,
+            5.0 * tiller_branching_scale,
+        ),
+    )
+    text = replace_block(
+        text, "tiller_final_lean_angle", single("tiller_final_lean_angle", 10.0, 4.0)
+    )
+    text = replace_block(
+        text,
+        "tiller_azimuth_jitter",
+        single("tiller_azimuth_jitter", 0.0, TILLER_AZIMUTH_JITTER_DEGREES),
+    )
     text = upsert_after(
         text,
         "tiller_azimuth_jitter",
@@ -377,19 +523,27 @@ def migrate(
         single("tiller_same_side_splay_angle", TILLER_SAME_SIDE_SPLAY_DEGREES),
     )
     text = re.sub(r"(?m)^tiller_recovery_phytomer_count:.*\n", "", text)
-    text = scalar(text, "tiller_recovery_axis_fraction", "1", "tiller_same_side_splay_angle")
+    text = scalar(
+        text, "tiller_recovery_axis_fraction", "1", "tiller_same_side_splay_angle"
+    )
     text = scalar(text, "culm_radial_segments", "24", "stem_material_specular")
     text = scalar(text, "culm_node_radius_scale", "1.08", "culm_radial_segments")
     text = scalar(text, "culm_texture_repeat_m", "0.25", "culm_node_radius_scale")
-    text = replace_block(text, "target_gdd", single("target_gdd", TARGET_GDD_BY_STAGE[stage]))
-    text = replace_block(text, "plastochron_gdd", single("plastochron_gdd", PLASTOCHRON_GDD))
+    text = replace_block(
+        text, "target_gdd", single("target_gdd", TARGET_GDD_BY_STAGE[stage])
+    )
+    text = replace_block(
+        text, "plastochron_gdd", single("plastochron_gdd", PLASTOCHRON_GDD)
+    )
     text = replace_block(text, "maturity_gdd", single("maturity_gdd", MATURITY_GDD))
     text = replace_block(
         text,
         "lateral_axis_plastochron_scale",
         single("lateral_axis_plastochron_scale", LATERAL_AXIS_PLASTOCHRON_SCALE),
     )
-    text = replace_block(text, "reference_maturity_gdd", single("reference_maturity_gdd", MATURITY_GDD))
+    text = replace_block(
+        text, "reference_maturity_gdd", single("reference_maturity_gdd", MATURITY_GDD)
+    )
     text = scalar(
         text,
         "finalize_snapshot_morphology",
@@ -403,7 +557,7 @@ def migrate(
             "bending_along_leaf",
             0.0,
             1.0,
-            profile["bending_along"],
+            blade_droop_profile(cultivar),
             0.0,
             [(0.0, 0.0), (1.0, 0.0)],
         ),
@@ -415,16 +569,39 @@ def migrate(
             "waviness_along_leaf",
             0.0,
             1.0,
-            [(0.0, 0.0), (0.08, 0.45), (0.25, 0.9), (0.55, 1.0), (0.8, 0.9), (1.0, 0.45)],
+            [
+                (0.0, 0.0),
+                (0.08, 0.45),
+                (0.25, 0.9),
+                (0.55, 1.0),
+                (0.8, 0.9),
+                (1.0, 0.45),
+            ],
             0.0,
             [(0.0, 0.0), (1.0, 0.0)],
         ),
     )
-    text = replace_block(text, "leaf_material_albedo_color", "leaf_material_albedo_color: [1, 1, 1]\n")
-    text = scalar(text, "leaf_material_subsurface_factor", "0", "leaf_material_specular")
-    text = scalar(text, "leaf_material_subsurface_color", "[0.26, 0.52, 0.18]", "leaf_material_subsurface_factor")
-    text = scalar(text, "leaf_material_subsurface_radius", "[0.001, 0.001, 0.001]", "leaf_material_subsurface_color")
-    text = replace_block(text, "stem_material_albedo_color", "stem_material_albedo_color: [1, 1, 1]\n")
+    text = replace_block(
+        text, "leaf_material_albedo_color", "leaf_material_albedo_color: [1, 1, 1]\n"
+    )
+    text = scalar(
+        text, "leaf_material_subsurface_factor", "0", "leaf_material_specular"
+    )
+    text = scalar(
+        text,
+        "leaf_material_subsurface_color",
+        "[0.26, 0.52, 0.18]",
+        "leaf_material_subsurface_factor",
+    )
+    text = scalar(
+        text,
+        "leaf_material_subsurface_radius",
+        "[0.001, 0.001, 0.001]",
+        "leaf_material_subsurface_color",
+    )
+    text = replace_block(
+        text, "stem_material_albedo_color", "stem_material_albedo_color: [1, 1, 1]\n"
+    )
     handles = {
         "stem_albedo_texture": 11677113829394799981,
         "stem_normal_texture": 15939859271237366179,
@@ -442,13 +619,28 @@ def migrate(
 def main() -> None:
     for stage, values in STAGES.items():
         for cultivar in ("BTX", "Pawaga"):
-            migrate(DESCRIPTORS / stage / f"{cultivar}.sorghumls", values, stage, finalize_snapshot=True)
-    manual_values = (0.0210, 0.1260, 0.00050, 0.00040)
+            migrate(
+                DESCRIPTORS / stage / f"{cultivar}.sorghumls",
+                values,
+                stage,
+                finalize_snapshot=True,
+            )
+    manual_values = (0.0210, STAGES["GrowthStage04"][1], 0.00050, 0.00040)
     for cultivar in ("BTX", "Pawaga"):
-        migrate(MANUAL / f"{cultivar}.sorghumls", manual_values, "GrowthStage04", finalize_snapshot=True)
-    for root in (ASSETS / "ManualAssets" / "Scenes", ASSETS / "GeneratedAssets" / "Scenes"):
+        migrate(
+            MANUAL / f"{cultivar}.sorghumls",
+            manual_values,
+            "GrowthStage04",
+            finalize_snapshot=True,
+        )
+    for root in (
+        ASSETS / "ManualAssets" / "Scenes",
+        ASSETS / "GeneratedAssets" / "Scenes",
+    ):
         for scene in root.glob("*.evescene"):
-            text = re.sub(r"(?m)^\s+leaf_thickness:.*\n", "", scene.read_text(encoding="utf-8"))
+            text = re.sub(
+                r"(?m)^\s+leaf_thickness:.*\n", "", scene.read_text(encoding="utf-8")
+            )
             scene.write_text(text, encoding="utf-8", newline="\n")
 
 
