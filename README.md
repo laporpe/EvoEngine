@@ -286,7 +286,9 @@ result = analyze_saved_4x10_scene(
 
 Analysis loads the saved recipe and asks the L-system package to restore its runtime-only geometry without Vulkan
 render uploads. The Python binding contains no plant reconstruction rules and never reassigns seeds or evaluation GDD
-or samples descriptor target GDD. It writes `scene.png`, raw single-scene `parbar_probes.csv`, `plants.csv`,
+or samples descriptor target GDD. It analyzes however many reproducible BTX or Pawaga plant roots remain in the saved
+scene, so whole-plant deletions are supported; delete the `*_LSystem_*` root rather than its runtime-only mesh children.
+It writes `scene.png`, raw single-scene `parbar_probes.csv`, `plants.csv`,
 `organs.csv`, and `manifest.json`. Illumination values remain EvoEngine-relative; PPFD conversion and physical
 interpretation remain illumination-consumer responsibilities.
 

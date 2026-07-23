@@ -134,9 +134,9 @@ class SavedSceneAnalysisTest(unittest.TestCase):
 
             evo = mock.Mock()
             evo.GetSorghumLsPlantSceneMetadata.return_value = [
-                plant(index) for index in range(40)
+                plant(index) for index in (0, 1, 20)
             ]
-            evo.MaterializeSorghumLsPlantGeometry.return_value = 40
+            evo.MaterializeSorghumLsPlantGeometry.return_value = 3
             evo.WaitForProjectIdle.return_value = True
             evo.CreateParbarTopFaceSensorGroup.return_value = "sensors"
             evo.GetParbarTopFaceSensorResults.return_value = probes(2)
@@ -174,7 +174,7 @@ class SavedSceneAnalysisTest(unittest.TestCase):
             with result.parbar_probes_csv.open(newline="", encoding="utf-8") as stream:
                 self.assertEqual(12, len(list(csv.DictReader(stream))))
             with result.plants_csv.open(newline="", encoding="utf-8") as stream:
-                self.assertEqual(40, len(list(csv.DictReader(stream))))
+                self.assertEqual(3, len(list(csv.DictReader(stream))))
             evo.GrowSorghumLsPlantsToGdd.assert_not_called()
             evo.GrowSorghumLsPlantsToAdulthood.assert_not_called()
             evo.SetSorghumLsCultivarDescriptors.assert_not_called()

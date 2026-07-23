@@ -533,26 +533,21 @@ def analyze_saved_4x10_scene(
         max_wait_frames,
     ) as evo:
         saved_records = list(evo.GetSorghumLsPlantSceneMetadata(False))
-        if len(saved_records) != 40 or any(
+        if not saved_records or any(
             not record.descriptor_asset_path for record in saved_records
         ):
-            raise RuntimeError("saved 4x10 scene must contain 40 reproducible plants")
+            raise RuntimeError("saved 4x10 scene must contain reproducible plants")
+        plant_count = len(saved_records)
         materialized = int(evo.MaterializeSorghumLsPlantGeometry(False))
-        if materialized != 40 or not evo.WaitForProjectIdle(max_wait_frames):
-            raise RuntimeError("failed to materialize all 40 saved plants")
+        if materialized != plant_count or not evo.WaitForProjectIdle(max_wait_frames):
+            raise RuntimeError(f"failed to materialize all {plant_count} saved plants")
         plant_records = list(evo.GetSorghumLsPlantSceneMetadata(True))
-        if len(plant_records) != 40 or any(
+        if len(plant_records) != plant_count or any(
             not record.has_geometry for record in plant_records
         ):
             raise RuntimeError("saved 4x10 plant geometry is incomplete")
-        cultivar_counts = {
-            cultivar: sum(record.cultivar == cultivar for record in plant_records)
-            for cultivar in ("BTX", "Pawaga")
-        }
-        if cultivar_counts != {"BTX": 20, "Pawaga": 20}:
-            raise RuntimeError(
-                f"saved 4x10 scene must contain 20 plants per cultivar: {cultivar_counts}"
-            )
+        if any(record.cultivar not in ("BTX", "Pawaga") for record in plant_records):
+            raise RuntimeError("saved 4x10 scene contains an unsupported cultivar")
         camera = _apply_capture_camera(evo)
         evo.LoopFrames(1)
         sensors = evo.CreateParbarTopFaceSensorGroup(probes_per_panel)

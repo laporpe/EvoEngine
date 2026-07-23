@@ -14,6 +14,24 @@ import sorghum_4x10_illumination_video as video
 
 
 class CampaignVideoTest(unittest.TestCase):
+    def test_camera_frames_remaining_generated_plants(self) -> None:
+        def point(x: float, y: float, z: float) -> SimpleNamespace:
+            return SimpleNamespace(x=x, y=y, z=z)
+
+        evo = SimpleNamespace(
+            GetSorghumLsPlantSceneMetadata=lambda _geometry: [
+                SimpleNamespace(
+                    has_geometry=True,
+                    geometry_min_position=point(-1.0, 0.0, -2.0),
+                    geometry_max_position=point(1.0, 2.0, 2.0),
+                )
+            ]
+        )
+
+        camera = video._camera_from_scene(evo, video.DEFAULT_SPEC)
+
+        self.assertEqual([0.0, 1.0, 0.0], camera["target"])
+
     def test_one_hundred_realizations_receive_three_frames_each(self) -> None:
         allocations = video.frame_allocations(100)
 
@@ -51,10 +69,16 @@ class CampaignVideoTest(unittest.TestCase):
 
             with Image.open(output) as frame:
                 self.assertEqual((spec.width, spec.height), frame.size)
-                self.assertEqual((13, 71, 129), frame.getpixel((10, spec.scene_height - 1)))
-                self.assertNotEqual((13, 71, 129), frame.getpixel((10, spec.scene_height)))
+                self.assertEqual(
+                    (13, 71, 129), frame.getpixel((10, spec.scene_height - 1))
+                )
+                self.assertNotEqual(
+                    (13, 71, 129), frame.getpixel((10, spec.scene_height))
+                )
 
-    @unittest.skipUnless(shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg is unavailable")
+    @unittest.skipUnless(
+        shutil.which("ffmpeg") and shutil.which("ffprobe"), "ffmpeg is unavailable"
+    )
     def test_assembly_encodes_the_exact_frame_count_and_manifest(self) -> None:
         spec = video.VideoSpec(width=640, height=450, fps=6, seconds_per_date=1)
         date = "2021-07-01"
@@ -100,9 +124,7 @@ class CampaignVideoTest(unittest.TestCase):
             self.assertTrue(video_path.is_file())
             self.assertEqual(6, manifest["frame_count"])
             self.assertEqual(1, manifest["duration_seconds"])
-            self.assertEqual(
-                {"samples": 2, "bounces": 2}, manifest["camera_render"]
-            )
+            self.assertEqual({"samples": 2, "bounces": 2}, manifest["camera_render"])
             self.assertFalse(staging.exists())
             opening = root / "opening.png"
             subprocess.run(

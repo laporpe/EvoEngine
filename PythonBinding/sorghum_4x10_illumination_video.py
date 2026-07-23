@@ -44,7 +44,10 @@ DEFAULT_SPEC = VideoSpec()
 
 
 def validate_configuration(
-    dates: list[str], replicates: int, probes_per_panel: int, spec: VideoSpec = DEFAULT_SPEC
+    dates: list[str],
+    replicates: int,
+    probes_per_panel: int,
+    spec: VideoSpec = DEFAULT_SPEC,
 ) -> None:
     if not dates or replicates <= 0 or probes_per_panel <= 0:
         raise ValueError("video requires dates, replicates, and probes")
@@ -60,7 +63,9 @@ def validate_configuration(
         or spec.scene_height <= 0
         or spec.scene_height >= spec.height
     ):
-        raise ValueError("video dimensions must be positive, even, and reserve a lower dashboard")
+        raise ValueError(
+            "video dimensions must be positive, even, and reserve a lower dashboard"
+        )
 
 
 def require_dependencies() -> tuple[str, str]:
@@ -81,11 +86,15 @@ def staging_root(checkpoint_dir: Path) -> Path:
     return checkpoint_dir / "video_staging"
 
 
-def _vec_add(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+def _vec_add(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return tuple(x + y for x, y in zip(a, b))
 
 
-def _vec_scale(value: tuple[float, float, float], scale: float) -> tuple[float, float, float]:
+def _vec_scale(
+    value: tuple[float, float, float], scale: float
+) -> tuple[float, float, float]:
     return tuple(component * scale for component in value)
 
 
@@ -93,7 +102,9 @@ def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
     return sum(x * y for x, y in zip(a, b))
 
 
-def _cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+def _cross(
+    a: tuple[float, float, float], b: tuple[float, float, float]
+) -> tuple[float, float, float]:
     return (
         a[1] * b[2] - a[2] * b[1],
         a[2] * b[0] - a[0] * b[2],
@@ -110,8 +121,8 @@ def _normalize(value: tuple[float, float, float]) -> tuple[float, float, float]:
 
 def _camera_from_scene(evo: object, spec: VideoSpec) -> dict[str, object]:
     records = list(evo.GetSorghumLsPlantSceneMetadata(True))
-    if len(records) != 40 or any(not record.has_geometry for record in records):
-        raise RuntimeError("video framing requires 40 generated 4x10 plants")
+    if not records or any(not record.has_geometry for record in records):
+        raise RuntimeError("video framing requires generated 4x10 plants")
     minimum = tuple(
         min(float(getattr(record.geometry_min_position, axis)) for record in records)
         for axis in ("x", "y", "z")
@@ -171,7 +182,9 @@ def prepare_capture_camera(
         raise RuntimeError(f"failed to apply the video camera for {date}")
 
 
-def running_means(accumulators: dict[tuple[str, str, int], object], probes_per_panel: int) -> list[float]:
+def running_means(
+    accumulators: dict[tuple[str, str, int], object], probes_per_panel: int
+) -> list[float]:
     values = []
     for cultivar, level in PANEL_ORDER:
         for probe in range(probes_per_panel):
@@ -211,10 +224,14 @@ def capture_realization(
     if not evo.CaptureCurrentSceneRayTraced(
         spec.width, spec.scene_height, temporary_scene, samples, bounces, 2.2
     ):
-        raise RuntimeError(f"scene video capture failed: {date} replicate {replicate_number}")
+        raise RuntimeError(
+            f"scene video capture failed: {date} replicate {replicate_number}"
+        )
     with Image.open(temporary_scene) as image:
         if image.size != (spec.width, spec.scene_height):
-            raise RuntimeError(f"scene video capture has the wrong dimensions: {temporary_scene}")
+            raise RuntimeError(
+                f"scene video capture has the wrong dimensions: {temporary_scene}"
+            )
     temporary_scene.replace(scene_path)
     payload = {
         "version": VIDEO_VERSION,
@@ -227,7 +244,9 @@ def capture_realization(
         "illumination_running_means": values,
     }
     temporary_means = means_path.with_suffix(".json.tmp")
-    temporary_means.write_text(json.dumps(payload, separators=(",", ":")), encoding="utf-8")
+    temporary_means.write_text(
+        json.dumps(payload, separators=(",", ":")), encoding="utf-8"
+    )
     temporary_means.replace(means_path)
 
 
@@ -298,7 +317,11 @@ def compose_frame(
     dashboard_height = spec.height - dashboard_top
     title_size = max(12, round(dashboard_height * 0.105))
     label_size = max(10, round(dashboard_height * 0.072))
-    status = "waiting for first illumination" if values is None else f"running mean: {replicate_number} fields"
+    status = (
+        "waiting for first illumination"
+        if values is None
+        else f"running mean: {replicate_number} fields"
+    )
     draw.text(
         (24, dashboard_top + 5),
         f"{date}   |   field {replicate_number:03d}/{replicates:03d}   |   {status}",
@@ -340,7 +363,12 @@ def compose_frame(
                 )
             )
             draw.rectangle(
-                (cell_left, round(grid_top), max(cell_left, cell_right), round(grid_bottom)),
+                (
+                    cell_left,
+                    round(grid_top),
+                    max(cell_left, cell_right),
+                    round(grid_bottom),
+                ),
                 fill=color,
             )
         draw.rectangle(
@@ -411,7 +439,9 @@ def assemble_video(
         probe = _probe_video(video_path, ffprobe)
         stream = probe["streams"][0]
         if int(stream["nb_read_frames"]) != expected_frames:
-            raise RuntimeError(f"existing campaign video has the wrong frame count: {video_path}")
+            raise RuntimeError(
+                f"existing campaign video has the wrong frame count: {video_path}"
+            )
         return video_path, manifest_path
 
     for date in dates:
@@ -469,7 +499,9 @@ def assemble_video(
                 video_frame += 1
                 os.link(source, sequence_dir / f"frame_{video_frame:06d}.png")
     if video_frame != expected_frames:
-        raise RuntimeError(f"video frame allocation produced {video_frame} of {expected_frames} frames")
+        raise RuntimeError(
+            f"video frame allocation produced {video_frame} of {expected_frames} frames"
+        )
     video_dir.mkdir(parents=True, exist_ok=True)
     temporary_video = video_path.with_name(f".{video_path.stem}.tmp.mp4")
     subprocess.run(
@@ -508,7 +540,9 @@ def assemble_video(
         or int(stream["nb_read_frames"]) != expected_frames
         or stream["r_frame_rate"] != f"{spec.fps}/1"
     ):
-        raise RuntimeError(f"encoded campaign video failed validation: {temporary_video}")
+        raise RuntimeError(
+            f"encoded campaign video failed validation: {temporary_video}"
+        )
     temporary_video.replace(video_path)
     manifest = {
         "version": VIDEO_VERSION,
