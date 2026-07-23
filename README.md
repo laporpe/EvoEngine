@@ -130,10 +130,21 @@ python -m pip install -r PythonBinding\requirements-mobile-review.txt
 python PythonBinding\sorghum_render_4x10_mobile_review.py --width 3840 --height 2160 --samples 128 --bounces 4
 ```
 
-The package is written to `out/realism_review/sorghum_4x10/Iteration_01_RT_PhysicalSun`. Add `--publish-drive` to
+The package is written to `out/realism_review/sorghum_4x10/Iteration_02_FieldPhotographic`. Add `--publish-drive` to
 publish the verified iteration under
-`G:\My Drive\Sorghum\4x10_Scene_Review_Latest\Iteration_01_RT_PhysicalSun` without replacing earlier reviews.
+`G:\My Drive\Sorghum\4x10_Scene_Review_Latest\Iteration_02_FieldPhotographic` without replacing earlier reviews.
 It contains 45 lossless Scene (RT) captures, 45 labeled images, five stage contact sheets, and a PDF review book.
+
+The three scene views use a fixed 42-degree field perspective, near-top-down fallback, and row-side fallback across
+all five dates. During camera capture only, a nonserializable plane reuses the authored soil material beyond the
+finite ground mesh; it is removed immediately afterward. The labeled stills and optional video receive a conservative
+display-referred color grade, while the lossless `raw/` images remain ungraded. Mountains and photographic
+backplates are intentionally omitted unless a site-authoritative reference becomes available.
+
+EvoEngine's leaf BSSRDF was evaluated at factor `0.12` and radius `0.8` mm against factor `0` with identical seed,
+camera, light, soil, and ray settings. The PNGs were byte-identical because post-growth material edits do not reach
+the current OptiX material record. The presentation therefore leaves calibrated leaf subsurface values at zero and
+does not modify the renderer or illumination backend to manufacture the effect.
 
 To regenerate all calibrated scenes and publish the review in one operation:
 
@@ -203,6 +214,14 @@ python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py --replic
 
 Video output is limited to at most 300 realizations, requires Pillow plus `ffmpeg` and `ffprobe`, and does not alter the
 scientific CSV calculation. The CSV-only 10,000-replicate run remains the production path.
+
+To prove presentation capture did not change a paired campaign, compare its two output directories byte-for-byte:
+
+```bat
+python PythonBinding\sorghum_validate_4x10_presentation_invariance.py out\validation\science_only out\validation\with_presentation --report out\validation\presentation_invariance.json
+```
+
+The validator requires exact equality for the aggregate PARBAR, individual-plant, clump, and replicate-seed CSVs.
 
 `PythonBinding/sorghum_4x10_scene.py` is the small importable boundary for custom analysis. Resolve one date with
 `query_4x10_scene(...)`, prepare its in-process scene once, then call `grow_4x10_scene(...)` for each morphology seed.

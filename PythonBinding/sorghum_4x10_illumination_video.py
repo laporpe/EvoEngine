@@ -12,13 +12,20 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from sorghum_4x10_presentation import (
+    DEFAULT_PROFILE,
+    apply_photo_grade,
+    camera_for_style,
+    set_ground_extension,
+)
+
 
 PANEL_ORDER = tuple(
     (cultivar, level)
     for cultivar in ("Pawaga", "BTX")
     for level in ("top", "middle", "bottom")
 )
-VIDEO_VERSION = 2
+VIDEO_VERSION = 3
 VIDEO_NAME = "sorghum_4x10_illumination_convergence.mp4"
 MANIFEST_NAME = "sorghum_4x10_illumination_convergence.json"
 
@@ -123,38 +130,9 @@ def _camera_from_scene(evo: object, spec: VideoSpec) -> dict[str, object]:
     records = list(evo.GetSorghumLsPlantSceneMetadata(True))
     if not records or any(not record.has_geometry for record in records):
         raise RuntimeError("video framing requires generated 4x10 plants")
-    minimum = tuple(
-        min(float(getattr(record.geometry_min_position, axis)) for record in records)
-        for axis in ("x", "y", "z")
+    return camera_for_style(
+        DEFAULT_PROFILE.camera_style, spec.width, spec.scene_height
     )
-    maximum = tuple(
-        max(float(getattr(record.geometry_max_position, axis)) for record in records)
-        for axis in ("x", "y", "z")
-    )
-    center = tuple((low + high) * 0.5 for low, high in zip(minimum, maximum))
-    front = _vec_scale(_normalize((1.0, 0.65, 1.0)), -1.0)
-    right = _normalize(_cross(front, (0.0, 1.0, 0.0)))
-    up = _normalize(_cross(right, front))
-    fov_degrees = 50.0
-    tan_vertical = math.tan(math.radians(fov_degrees) * 0.5)
-    tan_horizontal = tan_vertical * spec.width / spec.scene_height
-    distance = 0.1
-    for x in (minimum[0], maximum[0]):
-        for y in (minimum[1], maximum[1]):
-            for z in (minimum[2], maximum[2]):
-                relative = (x - center[0], y - center[1], z - center[2])
-                along_front = _dot(relative, front)
-                distance = max(
-                    distance,
-                    abs(_dot(relative, right)) / tan_horizontal - along_front,
-                    abs(_dot(relative, up)) / tan_vertical - along_front,
-                )
-    return {
-        "position": list(_vec_add(center, _vec_scale(front, -1.18 * distance))),
-        "target": list(center),
-        "up": list(up),
-        "fov_degrees": fov_degrees,
-    }
 
 
 def _vec3(evo: object, values: list[float]) -> object:
@@ -168,11 +146,22 @@ def prepare_capture_camera(
 ) -> None:
     path = root / date / "camera.json"
     if path.exists():
-        camera = json.loads(path.read_text(encoding="utf-8"))
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        camera = payload.get("camera", payload)
     else:
         camera = _camera_from_scene(evo, spec)
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(camera, indent=2), encoding="utf-8")
+        path.write_text(
+            json.dumps(
+                {
+                    "version": VIDEO_VERSION,
+                    "camera": camera,
+                    "presentation": DEFAULT_PROFILE.to_dict(),
+                },
+                indent=2,
+            ),
+            encoding="utf-8",
+        )
     if not evo.SetMainCameraLookAt(
         _vec3(evo, camera["position"]),
         _vec3(evo, camera["target"]),
@@ -220,13 +209,31 @@ def capture_realization(
         raise ValueError("video snapshot has the wrong number of PARBAR means")
     scene_path.parent.mkdir(parents=True, exist_ok=True)
     means_path.parent.mkdir(parents=True, exist_ok=True)
+    temporary_render = scene_path.with_name(f"{scene_path.stem}.tmp.render.png")
     temporary_scene = scene_path.with_name(f"{scene_path.stem}.tmp.png")
-    if not evo.CaptureCurrentSceneRayTraced(
-        spec.width, spec.scene_height, temporary_scene, samples, bounces, 2.2
-    ):
-        raise RuntimeError(
-            f"scene video capture failed: {date} replicate {replicate_number}"
-        )
+    ground_extended = 0
+    try:
+        ground_extended = set_ground_extension(evo, True)
+        if hasattr(evo, "ConfigurePresentationGroundExtension") and ground_extended != 1:
+            raise RuntimeError("failed to create the presentation ground extension")
+        evo.LoopFrames(1)
+        if not evo.CaptureCurrentSceneRayTraced(
+            spec.width,
+            spec.scene_height,
+            temporary_render,
+            samples,
+            bounces,
+            DEFAULT_PROFILE.gamma,
+        ):
+            raise RuntimeError(
+                f"scene video capture failed: {date} replicate {replicate_number}"
+            )
+        apply_photo_grade(temporary_render, temporary_scene)
+    finally:
+        if ground_extended:
+            set_ground_extension(evo, False)
+            evo.LoopFrames(1)
+        temporary_render.unlink(missing_ok=True)
     with Image.open(temporary_scene) as image:
         if image.size != (spec.width, spec.scene_height):
             raise RuntimeError(
@@ -240,6 +247,7 @@ def capture_realization(
         "probes_per_panel": probes_per_panel,
         "render_samples": samples,
         "render_bounces": bounces,
+        "presentation": DEFAULT_PROFILE.to_dict(),
         "panel_order": [list(key) for key in PANEL_ORDER],
         "illumination_running_means": values,
     }
@@ -565,6 +573,7 @@ def assemble_video(
             "samples": render_samples,
             "bounces": render_bounces,
         },
+        "presentation": DEFAULT_PROFILE.to_dict(),
         "frame_count": expected_frames,
         "duration_seconds": len(dates) * spec.seconds_per_date,
         "illumination_units": "relative simulated light; not calibrated physical PAR",

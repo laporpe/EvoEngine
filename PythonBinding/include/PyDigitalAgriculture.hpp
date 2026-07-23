@@ -286,6 +286,9 @@ class PyDigitalAgriculture {
   static bool CaptureCurrentSceneRayTraced(int resolution_x, int resolution_y, const std::filesystem::path& output_path,
                                            int samples = 64, int bounces = 4, float gamma = 2.2f);
 
+  static size_t ConfigurePresentationGroundExtension(bool enabled, float size_m = 160.0f,
+                                                      float texture_repeat_m = 4.0f);
+
   static std::array<uint64_t, 4> GetRayTracerBuildCounters();
 
   static size_t GrowSorghumLsPlantsToAdulthood(int seed_base = -1, const std::string& cultivar_filter = "",

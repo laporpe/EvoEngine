@@ -14,7 +14,7 @@ import sorghum_4x10_illumination_video as video
 
 
 class CampaignVideoTest(unittest.TestCase):
-    def test_camera_frames_remaining_generated_plants(self) -> None:
+    def test_fixed_camera_accepts_remaining_generated_plants(self) -> None:
         def point(x: float, y: float, z: float) -> SimpleNamespace:
             return SimpleNamespace(x=x, y=y, z=z)
 
@@ -30,7 +30,14 @@ class CampaignVideoTest(unittest.TestCase):
 
         camera = video._camera_from_scene(evo, video.DEFAULT_SPEC)
 
-        self.assertEqual([0.0, 1.0, 0.0], camera["target"])
+        self.assertEqual(
+            video.camera_for_style(
+                video.DEFAULT_PROFILE.camera_style,
+                video.DEFAULT_SPEC.width,
+                video.DEFAULT_SPEC.scene_height,
+            ),
+            camera,
+        )
 
     def test_one_hundred_realizations_receive_three_frames_each(self) -> None:
         allocations = video.frame_allocations(100)
