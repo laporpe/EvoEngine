@@ -1347,6 +1347,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("ambient_light_intensity") = 0.1f, py::arg("gamma") = 2.2f);
   m.def("CaptureCurrentSceneRayTraced", &CaptureCurrentSceneRayTraced, py::arg("resolution_x"), py::arg("resolution_y"),
         py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f);
+  m.def("ConfigurePresentationGroundExtension", &ConfigurePresentationGroundExtension, py::arg("enabled"),
+        py::arg("size_m") = 160.0f, py::arg("texture_repeat_m") = 4.0f);
   m.def("GetRayTracerBuildCounters", &GetRayTracerBuildCounters);
   m.def("GrowSorghumLsPlantsToAdulthood", &GrowSorghumLsPlantsToAdulthood, py::arg("seed_base") = -1,
         py::arg("cultivar_filter") = "", py::arg("reuse_geometry_entities") = false,
@@ -2098,6 +2100,88 @@ bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, 
 #  else
   return false;
 #  endif
+}
+
+size_t PyDigitalAgriculture::ConfigurePresentationGroundExtension(const bool enabled, const float size_m,
+                                                                  const float texture_repeat_m) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  constexpr const char* kPresentationGroundName = "__PresentationOnly_GroundExtension";
+  Entity extension = FindEntityByName(scene, kPresentationGroundName);
+  if (!enabled) {
+    if (scene->IsEntityValid(extension)) {
+      scene->DeleteEntity(extension);
+      if (const auto layer = ApplicationContext::Get().GetLayer<RayTracerLayer>()) {
+        layer->UpdateScene(scene);
+      }
+    }
+    return 0;
+  }
+  if (scene->IsEntityValid(extension)) {
+    return 1;
+  }
+  if (!std::isfinite(size_m) || !std::isfinite(texture_repeat_m) || size_m <= 0.0f || texture_repeat_m <= 0.0f) {
+    return 0;
+  }
+
+  const Entity ground = FindEntityByName(scene, "Ground Mesh");
+  const auto ground_renderer = scene->IsEntityValid(ground)
+                                   ? scene->GetOrSetPrivateComponent<MeshRenderer>(ground).lock()
+                                   : nullptr;
+  const auto ground_mesh = ground_renderer ? ground_renderer->mesh.Get<Mesh>() : nullptr;
+  const auto ground_material = ground_renderer ? ground_renderer->material.Get<Material>() : nullptr;
+  if (!ground_mesh || !ground_material || ground_mesh->PeekVertices().empty()) {
+    return 0;
+  }
+
+  const auto ground_transform = scene->GetDataComponent<GlobalTransform>(ground);
+  glm::vec3 minimum(std::numeric_limits<float>::max());
+  glm::vec3 maximum(std::numeric_limits<float>::lowest());
+  for (const auto& vertex : ground_mesh->PeekVertices()) {
+    const glm::vec3 world_position = ground_transform.TransformPoint(vertex.position);
+    minimum = glm::min(minimum, world_position);
+    maximum = glm::max(maximum, world_position);
+  }
+  const float half_size = size_m * 0.5f;
+  const glm::vec2 center((minimum.x + maximum.x) * 0.5f, (minimum.z + maximum.z) * 0.5f);
+  const float y = minimum.y - 0.015f;
+  const float uv_extent = size_m / texture_repeat_m;
+  std::vector<Vertex> vertices(4);
+  const std::array<glm::vec3, 4> positions{
+      glm::vec3(center.x - half_size, y, center.y - half_size),
+      glm::vec3(center.x + half_size, y, center.y - half_size),
+      glm::vec3(center.x + half_size, y, center.y + half_size),
+      glm::vec3(center.x - half_size, y, center.y + half_size),
+  };
+  const std::array<glm::vec2, 4> tex_coords{
+      glm::vec2(0.0f, 0.0f), glm::vec2(uv_extent, 0.0f), glm::vec2(uv_extent, uv_extent),
+      glm::vec2(0.0f, uv_extent)};
+  for (size_t index = 0; index < vertices.size(); ++index) {
+    vertices[index].position = positions[index];
+    vertices[index].normal = glm::vec3(0.0f, 1.0f, 0.0f);
+    vertices[index].tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+    vertices[index].tex_coord = tex_coords[index];
+  }
+  const std::vector<glm::uvec3> triangles{glm::uvec3(0, 2, 1), glm::uvec3(0, 3, 2)};
+  const auto mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+  VertexAttributes attributes{};
+  attributes.normal = true;
+  attributes.tangent = true;
+  attributes.tex_coord = true;
+  mesh->SetVertices(attributes, vertices, triangles);
+  mesh->ray_tracing_acceleration_enabled = true;
+
+  extension = scene->CreateEntity(kPresentationGroundName);
+  scene->SetEntitySerializable(extension, false);
+  const auto renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(extension).lock();
+  renderer->mesh = mesh;
+  renderer->material = ground_material;
+  if (const auto layer = ApplicationContext::Get().GetLayer<RayTracerLayer>()) {
+    layer->UpdateScene(scene);
+  }
+  return 1;
 }
 
 std::array<uint64_t, 4> PyDigitalAgriculture::GetRayTracerBuildCounters() {
