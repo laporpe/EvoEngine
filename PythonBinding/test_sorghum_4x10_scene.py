@@ -68,7 +68,9 @@ class ScenePreparationTest(unittest.TestCase):
             30000,
         )
 
-        evo.GrowSorghumLsPlantsToAdulthood.assert_called_once_with(2_000_000, "", True, False)
+        evo.GrowSorghumLsPlantsToAdulthood.assert_called_once_with(
+            2_000_000, "", True, False
+        )
         evo.MoveParbarMiddlePanelsToPlantHeightFraction.assert_called_once_with(
             2.0 / 3.0
         )
@@ -85,8 +87,51 @@ class ScenePreparationTest(unittest.TestCase):
 
         scenes.grow_4x10_scene(evo, scene, 2_005_000, 30000)
 
-        evo.GrowSorghumLsPlantsToAdulthood.assert_called_once_with(2_005_000, "", True, False)
+        evo.GrowSorghumLsPlantsToAdulthood.assert_called_once_with(
+            2_005_000, "", True, False
+        )
         evo.LoopFrames.assert_called_once_with(1)
+
+    def test_saves_explicit_growth_without_reassigning_descriptors(self) -> None:
+        evo = mock.Mock()
+        evo.GrowSorghumLsPlantsToGdd.return_value = 40
+        evo.WaitForProjectIdle.return_value = True
+        evo.MoveParbarMiddlePanelsToPlantHeightFraction.return_value = 2
+        evo.SaveActiveSceneAsProjectAsset.return_value = True
+        evo.GetSorghumLsPlantSceneMetadata.return_value = [
+            SimpleNamespace(
+                seed=2_000_000 + index,
+                evaluation_gdd=725.0,
+                has_geometry=True,
+                descriptor_asset_path="GeneratedAssets/Descriptors/GrowthStage03/BTX.sorghumls",
+            )
+            for index in range(40)
+        ]
+
+        records = scenes.save_loaded_4x10_scene_at_growth(
+            evo,
+            Path("GeneratedAssets/Scenes/Frozen.evescene"),
+            725.0,
+            2_000_000,
+        )
+
+        self.assertEqual(40, len(records))
+        evo.GrowSorghumLsPlantsToGdd.assert_called_once_with(725.0, 2_000_000, False)
+        evo.SaveActiveSceneAsProjectAsset.assert_called_once_with(
+            Path("GeneratedAssets/Scenes/Frozen.evescene")
+        )
+        evo.GrowSorghumLsPlantsToAdulthood.assert_not_called()
+        evo.SetSorghumLsCultivarDescriptors.assert_not_called()
+
+    def test_rejects_invalid_frozen_growth_inputs(self) -> None:
+        with self.assertRaises(ValueError):
+            scenes.save_loaded_4x10_scene_at_growth(
+                mock.Mock(), Path("Frozen.evescene"), float("nan"), 1
+            )
+        with self.assertRaises(ValueError):
+            scenes.save_loaded_4x10_scene_at_growth(
+                mock.Mock(), Path("C:/Frozen.evescene"), 1.0, 1
+            )
 
 
 class OrganIdTest(unittest.TestCase):

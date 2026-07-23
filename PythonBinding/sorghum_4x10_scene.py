@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import math
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
@@ -22,6 +23,7 @@ __all__ = [
     "plant_organ_ids",
     "prepare_4x10_scene",
     "query_4x10_scene",
+    "save_loaded_4x10_scene_at_growth",
 ]
 
 
@@ -156,6 +158,64 @@ def grow_4x10_scene(
         raise RuntimeError(
             f"project did not become idle after geometry seed {geometry_seed}"
         )
+
+
+def save_loaded_4x10_scene_at_growth(
+    evo: object,
+    output_scene: Path,
+    evaluation_gdd: float,
+    geometry_seed: int,
+    expected_plant_count: int = 40,
+    middle_panel_height_fraction: float = 2.0 / 3.0,
+    after_panel_move_frames: int = 2,
+    max_wait_frames: int = 30000,
+) -> list[object]:
+    if not math.isfinite(evaluation_gdd) or evaluation_gdd < 0.0:
+        raise ValueError("evaluation_gdd must be finite and non-negative")
+    if geometry_seed < 0:
+        raise ValueError("geometry_seed must be non-negative")
+    if output_scene.is_absolute():
+        raise ValueError(
+            "output_scene must be relative to the project Assets directory"
+        )
+
+    grown = int(evo.GrowSorghumLsPlantsToGdd(evaluation_gdd, geometry_seed, False))
+    if grown != expected_plant_count:
+        raise RuntimeError(f"expected {expected_plant_count} grown plants, got {grown}")
+    evo.LoopFrames(1)
+    if not evo.WaitForProjectIdle(max_wait_frames):
+        raise RuntimeError("project did not become idle after growth")
+
+    moved = int(
+        evo.MoveParbarMiddlePanelsToPlantHeightFraction(middle_panel_height_fraction)
+    )
+    if moved != 2:
+        raise RuntimeError(f"expected 2 moved middle PARBAR panels, got {moved}")
+    evo.LoopFrames(after_panel_move_frames)
+    if not evo.WaitForProjectIdle(max_wait_frames):
+        raise RuntimeError("project did not become idle after moving middle panels")
+
+    records = list(evo.GetSorghumLsPlantSceneMetadata(True))
+    if len(records) != expected_plant_count or any(
+        not record.has_geometry or not record.descriptor_asset_path
+        for record in records
+    ):
+        raise RuntimeError("frozen scene plants are incomplete")
+    expected_seeds = set(range(geometry_seed, geometry_seed + expected_plant_count))
+    if {int(record.seed) for record in records} != expected_seeds:
+        raise RuntimeError(
+            "frozen scene plant seeds do not match the requested seed range"
+        )
+    if any(
+        not math.isclose(
+            float(record.evaluation_gdd), evaluation_gdd, rel_tol=0.0, abs_tol=1e-4
+        )
+        for record in records
+    ):
+        raise RuntimeError("frozen scene plant GDD values do not match evaluation_gdd")
+    if not evo.SaveActiveSceneAsProjectAsset(output_scene):
+        raise RuntimeError(f"failed to save frozen scene: {output_scene}")
+    return records
 
 
 def plant_organ_ids(records: list[object]) -> list[PlantOrganIds]:

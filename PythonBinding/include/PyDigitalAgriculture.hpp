@@ -178,6 +178,10 @@ struct LSystemDescriptorPhenotypeRecord {
 struct LSystemPlantSceneMetadataRecord {
   std::string name;
   std::string cultivar;
+  std::string descriptor_asset_path;
+  uint32_t descriptor_version = 0;
+  uint32_t seed = 0;
+  float evaluation_gdd = 0.0f;
   glm::vec3 local_position = glm::vec3(0.0f);
   glm::vec3 global_position = glm::vec3(0.0f);
   glm::vec3 geometry_min_position = glm::vec3(0.0f);
@@ -287,6 +291,10 @@ class PyDigitalAgriculture {
   static size_t GrowSorghumLsPlantsToAdulthood(int seed_base = -1, const std::string& cultivar_filter = "",
                                                bool reuse_geometry_entities = false,
                                                bool update_render_geometry = true);
+
+  static size_t GrowSorghumLsPlantsToGdd(float evaluation_gdd, int seed_base = -1, bool update_render_geometry = true);
+
+  static size_t MaterializeSorghumLsPlantGeometry(bool update_render_geometry = false);
 
   static size_t SetSorghumLsLeafThickness(float leaf_thickness_m, bool regenerate_geometry = true);
 

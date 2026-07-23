@@ -9,6 +9,7 @@
 #include "BtfMeshRenderer.hpp"
 #include "GeometryStorage.hpp"
 #include "Jobs.hpp"
+#include "LSystemLayer.hpp"
 #include "LSystemRuleHelpers.hpp"
 #include "LSystemSerializationAdapters.hpp"
 #include "Lights.hpp"
@@ -1351,6 +1352,10 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
   m.def("GrowSorghumLsPlantsToAdulthood", &GrowSorghumLsPlantsToAdulthood, py::arg("seed_base") = -1,
         py::arg("cultivar_filter") = "", py::arg("reuse_geometry_entities") = false,
         py::arg("update_render_geometry") = true);
+  m.def("GrowSorghumLsPlantsToGdd", &GrowSorghumLsPlantsToGdd, py::arg("evaluation_gdd"), py::arg("seed_base") = -1,
+        py::arg("update_render_geometry") = true);
+  m.def("MaterializeSorghumLsPlantGeometry", &MaterializeSorghumLsPlantGeometry,
+        py::arg("update_render_geometry") = false);
   m.def("SetSorghumLsLeafThickness", &SetSorghumLsLeafThickness, py::arg("leaf_thickness_m"),
         py::arg("regenerate_geometry") = true);
   m.def("SetSorghumLsLeafWidthScale", &SetSorghumLsLeafWidthScale, py::arg("leaf_width_scale"),
@@ -1527,6 +1532,10 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
   py::class_<LSystemPlantSceneMetadataRecord>(m, "LSystemPlantSceneMetadataRecord")
       .def_readonly("name", &LSystemPlantSceneMetadataRecord::name)
       .def_readonly("cultivar", &LSystemPlantSceneMetadataRecord::cultivar)
+      .def_readonly("descriptor_asset_path", &LSystemPlantSceneMetadataRecord::descriptor_asset_path)
+      .def_readonly("descriptor_version", &LSystemPlantSceneMetadataRecord::descriptor_version)
+      .def_readonly("seed", &LSystemPlantSceneMetadataRecord::seed)
+      .def_readonly("evaluation_gdd", &LSystemPlantSceneMetadataRecord::evaluation_gdd)
       .def_readonly("local_position", &LSystemPlantSceneMetadataRecord::local_position)
       .def_readonly("global_position", &LSystemPlantSceneMetadataRecord::global_position)
       .def_readonly("geometry_min_position", &LSystemPlantSceneMetadataRecord::geometry_min_position)
@@ -2170,6 +2179,17 @@ size_t PyDigitalAgriculture::GrowSorghumLsPlantsToAdulthood(const int seed_base,
   return plants.size();
 }
 
+size_t PyDigitalAgriculture::GrowSorghumLsPlantsToGdd(const float evaluation_gdd, const int seed_base,
+                                                      const bool update_render_geometry) {
+  const auto layer = ApplicationContext::Get().GetLayer<LSystemLayer>();
+  return layer ? layer->RegenerateSorghumScene(evaluation_gdd, seed_base, update_render_geometry) : 0;
+}
+
+size_t PyDigitalAgriculture::MaterializeSorghumLsPlantGeometry(const bool update_render_geometry) {
+  const auto layer = ApplicationContext::Get().GetLayer<LSystemLayer>();
+  return layer ? layer->RestoreSorghumScene(update_render_geometry) : 0;
+}
+
 size_t PyDigitalAgriculture::SetSorghumLsLeafThickness(const float leaf_thickness_m, const bool regenerate_geometry) {
   const auto scene = ApplicationContext::Get().GetActiveScene();
   if (!scene) {
@@ -2545,6 +2565,12 @@ std::vector<LSystemPlantSceneMetadataRecord> PyDigitalAgriculture::GetSorghumLsP
     record.local_position = scene->GetDataComponent<Transform>(plant).GetPosition();
     record.global_position = scene->GetDataComponent<GlobalTransform>(plant).GetPosition();
     if (const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(plant).lock()) {
+      record.seed = sorghum->seed;
+      record.evaluation_gdd = sorghum->target_gdd;
+      if (const auto descriptor = sorghum->descriptor_ref.Get<SorghumLSDescriptor>()) {
+        record.descriptor_asset_path = descriptor->GetAssetsFolderRelativePath().generic_string();
+        record.descriptor_version = descriptor->GetVersion();
+      }
       record.leaf_count = sorghum->last_leaf_count;
       record.last_grow_seconds = sorghum->last_grow_seconds;
       record.last_rebuild_seconds = sorghum->last_rebuild_seconds;

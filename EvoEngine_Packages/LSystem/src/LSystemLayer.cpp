@@ -2,6 +2,7 @@
 
 #include "Application.hpp"
 #include "EditorLayer.hpp"
+#include "Jobs.hpp"
 #include "LSystemInspectionAdapters.hpp"
 #include "LSystemSerializationAdapters.hpp"
 #include "Scene.hpp"
@@ -10,6 +11,7 @@
 #include "SorghumLS.hpp"
 #include "SorghumLSDescriptor.hpp"
 #include "Times.hpp"
+#include "TransformGraph.hpp"
 
 #include <algorithm>
 #include <chrono>
@@ -103,8 +105,7 @@ int ResolveEffectiveColorMode(const int selected_mode, const bool scene_plant_vi
 void ApplyGlobalPlantColorMode(const int selected_mode, const bool scene_plant_view_tint_enabled) {
   const int effective_mode = ResolveEffectiveColorMode(selected_mode, scene_plant_view_tint_enabled);
   ScotsPine::SetGlobalColorMode(static_cast<ScotsPine::ColorMode>(effective_mode));
-  SorghumLS::SetGlobalColorMode(
-      static_cast<SorghumLS::ColorMode>(std::clamp(effective_mode, 0, 4)));
+  SorghumLS::SetGlobalColorMode(static_cast<SorghumLS::ColorMode>(std::clamp(effective_mode, 0, 4)));
 }
 
 void ApplyPineStemOnlyMode(const std::shared_ptr<Scene>& scene, const bool stem_only_mode,
@@ -126,7 +127,6 @@ void ApplyPineStemOnlyMode(const std::shared_ptr<Scene>& scene, const bool stem_
       }
     }
   }
-
 }
 
 template <typename GrowthStepProfile>
@@ -202,6 +202,25 @@ PineTemporalSample SamplePineTemporalParameters(ScotsPine& pine) {
 
 }  // namespace
 
+namespace {
+size_t PublishSorghumGeometry(const std::shared_ptr<Scene>& scene,
+                              const std::vector<std::shared_ptr<SorghumLS>>& plants,
+                              const bool update_render_geometry) {
+  if (plants.empty()) {
+    return 0;
+  }
+  std::vector<std::shared_ptr<const SorghumGeometrySnapshot>> snapshots(plants.size());
+  Jobs::RunParallelFor(plants.size(), [&](const size_t index) {
+    snapshots[index] = plants[index]->GenerateGeometrySnapshot(true);
+  });
+  for (size_t index = 0; index < plants.size(); ++index) {
+    plants[index]->PublishGeometrySnapshot(snapshots[index], update_render_geometry);
+  }
+  TransformGraph::CalculateTransformGraphs(scene);
+  return plants.size();
+}
+}  // namespace
+
 void LSystemLayer::OnCreate() {
   simulation_day_of_year = NormalizeDayOfYear(static_cast<float>(std::clamp(season_start_day, 0, 364)));
   ApplyGlobalPlantColorMode(tassel_color_mode, scene_plant_view_tint_enabled);
@@ -209,6 +228,59 @@ void LSystemLayer::OnCreate() {
 }
 
 void LSystemLayer::OnDestroy() {
+}
+
+void LSystemLayer::PreUpdate() {
+  RestoreSorghumScene();
+}
+
+size_t LSystemLayer::RegenerateSorghumScene(const float evaluation_gdd, const int seed_base,
+                                            const bool update_render_geometry) const {
+  const auto scene = GetScene();
+  if (!scene) {
+    return 0;
+  }
+  std::vector<std::shared_ptr<SorghumLS>> plants;
+  uint32_t seed_offset = 0;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto plant = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      if (!plant || !plant->descriptor_ref.Get<SorghumLSDescriptor>()) {
+        continue;
+      }
+      if (seed_base >= 0) {
+        plant->seed = static_cast<uint32_t>(seed_base) + seed_offset;
+      }
+      plant->target_gdd = std::max(0.0f, evaluation_gdd);
+      plants.emplace_back(plant);
+      ++seed_offset;
+    }
+  }
+  return PublishSorghumGeometry(scene, plants, update_render_geometry);
+}
+
+size_t LSystemLayer::RestoreSorghumScene(const bool update_render_geometry) const {
+  const auto scene = GetScene();
+  if (!scene) {
+    return 0;
+  }
+  std::vector<std::shared_ptr<SorghumLS>> plants;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto plant = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      if (plant && !plant->growth_model.IsInitialized() && plant->target_gdd > 0.0f &&
+          plant->descriptor_ref.Get<SorghumLSDescriptor>()) {
+        plants.emplace_back(plant);
+      }
+    }
+  }
+  return PublishSorghumGeometry(scene, plants, update_render_geometry);
 }
 
 void LSystemLayer::PushProfileFrame(const ProfileFrame& frame) {
@@ -243,13 +315,12 @@ void LSystemLayer::ExportProfileCsv(const std::string& path) const {
          "live_leaves,invalid_instances\n";
   for (size_t i = 0; i < profiling_history.size(); i++) {
     const auto& f = profiling_history[i];
-    out << i << "," << std::fixed << std::setprecision(4) << f.update_ms << "," << f.grow_ms << ","
-        << f.growth_rules_ms << "," << f.topology_rules_ms << "," << f.sort_lists_ms << ","
-        << f.update_node_info_ms << "," << f.propagate_geometry_ms << "," << f.topology_scan_ms << ","
-        << f.rebuild_ms << "," << f.internode_rebuild_ms << "," << f.leaf_spline_ms << "," << f.leaf_mesh_ms << ","
-        << f.mesh_upload_ms << "," << f.pine_count << "," << f.sorghum_count << "," << f.growth_steps << ","
-        << f.node_count << "," << f.internode_count << "," << f.needle_count << "," << f.leaf_count << ","
-        << f.live_leaf_count << "," << f.invalid_instance_count << "\n";
+    out << i << "," << std::fixed << std::setprecision(4) << f.update_ms << "," << f.grow_ms << "," << f.growth_rules_ms
+        << "," << f.topology_rules_ms << "," << f.sort_lists_ms << "," << f.update_node_info_ms << ","
+        << f.propagate_geometry_ms << "," << f.topology_scan_ms << "," << f.rebuild_ms << "," << f.internode_rebuild_ms
+        << "," << f.leaf_spline_ms << "," << f.leaf_mesh_ms << "," << f.mesh_upload_ms << "," << f.pine_count << ","
+        << f.sorghum_count << "," << f.growth_steps << "," << f.node_count << "," << f.internode_count << ","
+        << f.needle_count << "," << f.leaf_count << "," << f.live_leaf_count << "," << f.invalid_instance_count << "\n";
   }
 }
 
@@ -692,8 +763,7 @@ void l_system_package::SerializeLSystemLayer(YAML::Emitter& out, const LSystemLa
   out << YAML::Key << "chronological_days_per_second" << YAML::Value << target.chronological_days_per_second;
   out << YAML::Key << "auto_grow_max_delta_time" << YAML::Value << target.auto_grow_max_delta_time;
   out << YAML::Key << "simulation_day_of_year" << YAML::Value << NormalizeDayOfYear(target.simulation_day_of_year);
-  out << YAML::Key << "sorghum_growth_step_cap_per_update" << YAML::Value
-      << target.sorghum_growth_step_cap_per_update;
+  out << YAML::Key << "sorghum_growth_step_cap_per_update" << YAML::Value << target.sorghum_growth_step_cap_per_update;
   out << YAML::Key << "reseed_on_reset" << YAML::Value << target.reseed_on_reset;
   out << YAML::Key << "tassel_color_mode" << YAML::Value << target.tassel_color_mode;
   out << YAML::Key << "scene_plant_view_tint_enabled" << YAML::Value << target.scene_plant_view_tint_enabled;

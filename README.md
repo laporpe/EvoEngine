@@ -232,6 +232,64 @@ grow_4x10_scene(evo, scene, geometry_seed=2_001_000, max_wait_frames=30000)
 
 The full CSV command above already uses this API; the sketch is only for a consumer supplying custom probe logic.
 
+### Frozen 4x10 scenes
+
+`PythonBinding/sorghum_4x10_saved_scene.py` provides the small saved-scene boundary. Freezing uses the descriptors
+already referenced by the selected published growth-stage scene, assigns a deterministic seed to each plant, grows
+all plants to the requested **evaluation GDD**, moves the middle PARBAR panels, and saves a new `.evescene`. It does
+not edit or replace the descriptor asset, including the descriptor's published target/maturity GDD distribution.
+
+The scene serializes each plant's descriptor reference, seed, evaluation GDD, and leaf mesh settings. A neighboring
+`.provenance.json` records all 40 identities and hashes the scene and its fixed published descriptor assets. The
+L-system package automatically reconstructs runtime-only plant geometry when the scene is attached after an editor or
+engine restart. The editor's ordinary Save Scene command uses this same contract. Generic scene, mesh, material,
+texture, and soil serialization are unchanged. Identical geometry is expected with the same EvoEngine build and
+assets; cross-build bitwise identity is intentionally not promised.
+
+Run from `PythonBinding`, or add that directory to `PYTHONPATH` when importing from the repository root. The current
+EvoEngine SDK does not reliably survive a second shutdown after restarting in one interpreter, so each function
+intentionally owns one engine session and must be called from a fresh Python process. Save first; analyze in a later
+invocation.
+
+```python
+from pathlib import Path
+from sorghum_4x10_saved_scene import save_4x10_scene_at_growth
+
+project = Path("Resources/DigitalAgricultureProject/test_lsystem_sorghum.eveproj")
+snapshot = save_4x10_scene_at_growth(
+    project=project,
+    source_scene=Path("GeneratedAssets/Scenes/Sorghum_4x10_GrowthStage03.evescene"),
+    scene=Path("GeneratedAssets/Scenes/MyFrozenField.evescene"),
+    evaluation_gdd=725.0,
+    geometry_seed=2_000_000,
+)
+```
+
+Then, from a new Python process:
+
+```python
+from pathlib import Path
+from sorghum_4x10_saved_scene import analyze_saved_4x10_scene
+
+project = Path("Resources/DigitalAgricultureProject/test_lsystem_sorghum.eveproj")
+result = analyze_saved_4x10_scene(
+    project=project,
+    scene=Path("GeneratedAssets/Scenes/MyFrozenField.evescene"),
+    output_dir=Path("out/scene_analysis"),
+    probes_per_panel=100,
+    illumination_samples=64,
+    illumination_bounces=4,
+    render_samples=64,
+    render_bounces=4,
+)
+```
+
+Analysis loads the saved recipe and asks the L-system package to restore its runtime-only geometry without Vulkan
+render uploads. The Python binding contains no plant reconstruction rules and never reassigns seeds or evaluation GDD
+or samples descriptor target GDD. It writes `scene.png`, raw single-scene `parbar_probes.csv`, `plants.csv`,
+`organs.csv`, and `manifest.json`. Illumination values remain EvoEngine-relative; PPFD conversion and physical
+interpretation remain illumination-consumer responsibilities.
+
 ## Related Publications
 
 EvoEngine supports research workflows used in digital forestry and digital agriculture. Related work includes:
