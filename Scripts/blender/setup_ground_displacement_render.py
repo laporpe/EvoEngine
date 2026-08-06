@@ -157,6 +157,14 @@ def rebuild_ground_material(
             links.new(albedo.outputs["Color"], multiply.inputs["A"])
             links.new(ao.outputs["Color"], multiply.inputs["B"])
             color_output = multiply.outputs["Result"]
+        color_calibration = material.node_tree.nodes.new("ShaderNodeHueSaturation")
+        color_calibration.name = "SWEEP Soil Reference Color Calibration"
+        color_calibration.label = "SWEEP reference-photo color calibration"
+        color_calibration.location = (-100, 130)
+        color_calibration.inputs["Saturation"].default_value = 1.75
+        color_calibration.inputs["Value"].default_value = 0.15
+        links.new(color_output, color_calibration.inputs["Color"])
+        color_output = color_calibration.outputs["Color"]
         links.new(color_output, bsdf.inputs["Base Color"])
     if images["roughness"] and "Roughness" in bsdf.inputs:
         roughness = add_image_node(material, images["roughness"], "soil roughness", (-420, -230))
@@ -293,7 +301,7 @@ def configure_cycles(samples: int, resolution_x: int, resolution_y: int) -> None
     scene.cycles.transparent_max_bounces = 12
     scene.render.resolution_x = resolution_x
     scene.render.resolution_y = resolution_y
-    scene.view_settings.exposure = -0.2
+    scene.view_settings.exposure = -0.9
     scene.view_settings.gamma = 1.0
     try:
         preferences = bpy.context.preferences.addons["cycles"].preferences
@@ -405,6 +413,7 @@ def main() -> None:
         bpy.ops.render.render(write_still=True)
 
     write_report(args.output_blend.with_name(args.output_blend.stem + "_report.json"), ground, texture_paths, args)
+    print(f"SWEEP_BLENDER_GROUND passed output={args.output_blend}")
 
 
 if __name__ == "__main__":

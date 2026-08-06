@@ -287,7 +287,8 @@ class PyDigitalAgriculture {
                                            int samples = 64, int bounces = 4, float gamma = 2.2f);
 
   static size_t ConfigurePresentationGroundExtension(bool enabled, float size_m = 160.0f,
-                                                      float texture_repeat_m = 4.0f);
+                                                      float texture_repeat_m = 2.0f,
+                                                      float grid_spacing_m = 1.0f);
 
   static std::array<uint64_t, 4> GetRayTracerBuildCounters();
 

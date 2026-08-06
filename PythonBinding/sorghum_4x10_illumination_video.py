@@ -10,6 +10,7 @@ import os
 import shutil
 import subprocess
 from dataclasses import asdict, dataclass
+from datetime import date as CalendarDate
 from pathlib import Path
 
 from sorghum_4x10_presentation import (
@@ -25,9 +26,47 @@ PANEL_ORDER = tuple(
     for cultivar in ("Pawaga", "BTX")
     for level in ("top", "middle", "bottom")
 )
-VIDEO_VERSION = 3
+VIDEO_VERSION = 5
 VIDEO_NAME = "sorghum_4x10_illumination_convergence.mp4"
 MANIFEST_NAME = "sorghum_4x10_illumination_convergence.json"
+REFERENCE_SUN_ANGLES_DEGREES = (90.0, 0.0, 0.0)
+SUNRISE_SUNSET_ELEVATION_DEGREES = -0.833
+
+
+@dataclass(frozen=True)
+class SolarSite:
+    name: str
+    latitude_degrees: float
+    longitude_degrees: float
+    utc_offset_hours: float
+    timezone_label: str
+
+
+# The original illumination driver names its NSRDB source
+# 524042_33.08_-111.97_2021.csv. Arizona remains on UTC-7 in summer.
+DEFAULT_SOLAR_SITE = SolarSite(
+    name="NSRDB 524042 Arizona field site",
+    latitude_degrees=33.08,
+    longitude_degrees=-111.97,
+    utc_offset_hours=-7.0,
+    timezone_label="MST",
+)
+
+
+@dataclass(frozen=True)
+class SolarFrame:
+    frame_number: int
+    frame_count: int
+    local_minutes: float
+    local_time: str
+    elevation_degrees: float
+    azimuth_degrees: float
+    sun_angles_degrees: tuple[float, float, float]
+
+    def to_dict(self) -> dict[str, object]:
+        payload = asdict(self)
+        payload["sun_angles_degrees"] = list(self.sun_angles_degrees)
+        return payload
 
 
 @dataclass(frozen=True)
@@ -48,6 +87,133 @@ class VideoSpec:
 
 
 DEFAULT_SPEC = VideoSpec()
+
+
+def _solar_terms(day: CalendarDate) -> tuple[float, float]:
+    days_in_year = 366 if day.replace(month=12, day=31).timetuple().tm_yday == 366 else 365
+    gamma = 2.0 * math.pi / days_in_year * (day.timetuple().tm_yday - 1)
+    equation_of_time_minutes = 229.18 * (
+        0.000075
+        + 0.001868 * math.cos(gamma)
+        - 0.032077 * math.sin(gamma)
+        - 0.014615 * math.cos(2.0 * gamma)
+        - 0.040849 * math.sin(2.0 * gamma)
+    )
+    declination_radians = (
+        0.006918
+        - 0.399912 * math.cos(gamma)
+        + 0.070257 * math.sin(gamma)
+        - 0.006758 * math.cos(2.0 * gamma)
+        + 0.000907 * math.sin(2.0 * gamma)
+        - 0.002697 * math.cos(3.0 * gamma)
+        + 0.00148 * math.sin(3.0 * gamma)
+    )
+    return equation_of_time_minutes, declination_radians
+
+
+def _solar_day_bounds(
+    day: CalendarDate, site: SolarSite = DEFAULT_SOLAR_SITE
+) -> tuple[float, float, float]:
+    equation_of_time, declination = _solar_terms(day)
+    latitude = math.radians(site.latitude_degrees)
+    zenith = math.radians(90.0 - SUNRISE_SUNSET_ELEVATION_DEGREES)
+    cosine_hour_angle = (
+        math.cos(zenith) / (math.cos(latitude) * math.cos(declination))
+        - math.tan(latitude) * math.tan(declination)
+    )
+    if not -1.0 <= cosine_hour_angle <= 1.0:
+        raise ValueError(f"site has no sunrise/sunset on {day.isoformat()}")
+    hour_angle_degrees = math.degrees(math.acos(cosine_hour_angle))
+    solar_noon = (
+        720.0
+        - equation_of_time
+        - 4.0 * site.longitude_degrees
+        + 60.0 * site.utc_offset_hours
+    )
+    return (
+        solar_noon - 4.0 * hour_angle_degrees,
+        solar_noon,
+        solar_noon + 4.0 * hour_angle_degrees,
+    )
+
+
+def _solar_position(
+    day: CalendarDate,
+    local_minutes: float,
+    site: SolarSite = DEFAULT_SOLAR_SITE,
+) -> tuple[float, float]:
+    equation_of_time, declination = _solar_terms(day)
+    latitude = math.radians(site.latitude_degrees)
+    true_solar_minutes = (
+        local_minutes
+        + equation_of_time
+        + 4.0 * site.longitude_degrees
+        - 60.0 * site.utc_offset_hours
+    ) % 1440.0
+    hour_angle = math.radians(true_solar_minutes / 4.0 - 180.0)
+    cosine_zenith = (
+        math.sin(latitude) * math.sin(declination)
+        + math.cos(latitude) * math.cos(declination) * math.cos(hour_angle)
+    )
+    zenith = math.acos(max(-1.0, min(1.0, cosine_zenith)))
+    elevation = 90.0 - math.degrees(zenith)
+    azimuth = (
+        math.degrees(
+            math.atan2(
+                math.sin(hour_angle),
+                math.cos(hour_angle) * math.sin(latitude)
+                - math.tan(declination) * math.cos(latitude),
+            )
+        )
+        + 180.0
+    ) % 360.0
+    return elevation, azimuth
+
+
+def _clock_label(local_minutes: float) -> str:
+    total_seconds = round(local_minutes * 60.0) % (24 * 60 * 60)
+    hour, remainder = divmod(total_seconds, 60 * 60)
+    minute, second = divmod(remainder, 60)
+    return f"{hour:02d}:{minute:02d}:{second:02d}"
+
+
+def solar_sweep_for_date(
+    date: str,
+    frame_count: int,
+    site: SolarSite = DEFAULT_SOLAR_SITE,
+) -> list[SolarFrame]:
+    if frame_count < 2:
+        raise ValueError("solar sweep requires at least two frames")
+    day = CalendarDate.fromisoformat(date)
+    sunrise, _, sunset = _solar_day_bounds(day, site)
+    frames = []
+    for frame_number in range(1, frame_count + 1):
+        fraction = (frame_number - 1) / (frame_count - 1)
+        local_minutes = sunrise + fraction * (sunset - sunrise)
+        elevation, azimuth = _solar_position(day, local_minutes, site)
+        frames.append(
+            SolarFrame(
+                frame_number=frame_number,
+                frame_count=frame_count,
+                local_minutes=local_minutes,
+                local_time=_clock_label(local_minutes),
+                elevation_degrees=elevation,
+                azimuth_degrees=azimuth,
+                sun_angles_degrees=(elevation, azimuth, 0.0),
+            )
+        )
+    return frames
+
+
+def solar_frame_for_replicate(
+    date: str,
+    replicate_number: int,
+    replicates: int,
+    site: SolarSite = DEFAULT_SOLAR_SITE,
+) -> SolarFrame:
+    if not 1 <= replicate_number <= replicates:
+        raise ValueError("solar frame is outside the realization range")
+    return solar_sweep_for_date(date, replicates, site)[replicate_number - 1]
 
 
 def validate_configuration(
@@ -199,6 +365,7 @@ def capture_realization(
     samples: int,
     bounces: int,
     spec: VideoSpec = DEFAULT_SPEC,
+    solar_frame: SolarFrame | None = None,
 ) -> None:
     from PIL import Image
 
@@ -213,6 +380,9 @@ def capture_realization(
     temporary_scene = scene_path.with_name(f"{scene_path.stem}.tmp.png")
     ground_extended = 0
     try:
+        if solar_frame:
+            evo.SetSunDirection(_vec3(evo, list(solar_frame.sun_angles_degrees)))
+            evo.LoopFrames(1)
         ground_extended = set_ground_extension(evo, True)
         if hasattr(evo, "ConfigurePresentationGroundExtension") and ground_extended != 1:
             raise RuntimeError("failed to create the presentation ground extension")
@@ -233,6 +403,9 @@ def capture_realization(
         if ground_extended:
             set_ground_extension(evo, False)
             evo.LoopFrames(1)
+        if solar_frame:
+            evo.SetSunDirection(_vec3(evo, list(REFERENCE_SUN_ANGLES_DEGREES)))
+            evo.LoopFrames(1)
         temporary_render.unlink(missing_ok=True)
     with Image.open(temporary_scene) as image:
         if image.size != (spec.width, spec.scene_height):
@@ -248,6 +421,7 @@ def capture_realization(
         "render_samples": samples,
         "render_bounces": bounces,
         "presentation": DEFAULT_PROFILE.to_dict(),
+        "solar_sweep": solar_frame.to_dict() if solar_frame else None,
         "panel_order": [list(key) for key in PANEL_ORDER],
         "illumination_running_means": values,
     }
@@ -259,7 +433,12 @@ def capture_realization(
 
 
 def validate_staged_prefix(
-    root: Path, date: str, replicates: int, probes_per_panel: int
+    root: Path,
+    date: str,
+    replicates: int,
+    probes_per_panel: int,
+    solar_sweep: bool = False,
+    solar_frame_count: int | None = None,
 ) -> None:
     for replicate_number in range(1, replicates + 1):
         scene_path = root / date / "scenes" / f"{replicate_number:04d}.png"
@@ -269,12 +448,20 @@ def validate_staged_prefix(
                 f"video resume is missing {date} realization {replicate_number} artifacts"
             )
         payload = json.loads(means_path.read_text(encoding="utf-8"))
+        expected_solar = (
+            solar_frame_for_replicate(
+                date, replicate_number, solar_frame_count or replicates
+            ).to_dict()
+            if solar_sweep
+            else None
+        )
         if (
             payload.get("date") != date
             or payload.get("replicate_number") != replicate_number
             or payload.get("probes_per_panel") != probes_per_panel
             or len(payload.get("illumination_running_means", []))
             != len(PANEL_ORDER) * probes_per_panel
+            or payload.get("solar_sweep") != expected_solar
         ):
             raise RuntimeError(f"invalid staged video means: {means_path}")
 
@@ -312,6 +499,8 @@ def compose_frame(
     scale_min: float,
     scale_max: float,
     spec: VideoSpec = DEFAULT_SPEC,
+    solar_frame: dict[str, object] | None = None,
+    dashboard_status: str | None = None,
 ) -> None:
     from PIL import Image, ImageDraw
 
@@ -325,14 +514,24 @@ def compose_frame(
     dashboard_height = spec.height - dashboard_top
     title_size = max(12, round(dashboard_height * 0.105))
     label_size = max(10, round(dashboard_height * 0.072))
-    status = (
-        "waiting for first illumination"
-        if values is None
-        else f"running mean: {replicate_number} fields"
+    status = dashboard_status or (
+        "waiting for first illumination" if values is None else (
+            f"PARBAR mean (fixed reference sun): {replicate_number} fields"
+            if solar_frame
+            else f"running mean: {replicate_number} fields"
+        )
+    )
+    solar_status = (
+        ""
+        if not solar_frame
+        else (
+            f"   |   {solar_frame['local_time'][:5]} {DEFAULT_SOLAR_SITE.timezone_label}"
+            f"   sun {float(solar_frame['elevation_degrees']):.1f} deg"
+        )
     )
     draw.text(
         (24, dashboard_top + 5),
-        f"{date}   |   field {replicate_number:03d}/{replicates:03d}   |   {status}",
+        f"{date}   |   field {replicate_number:03d}/{replicates:03d}   |   {status}{solar_status}",
         fill=(240, 244, 245),
         font=_font(title_size),
     )
@@ -436,6 +635,8 @@ def assemble_video(
     render_samples: int,
     render_bounces: int,
     spec: VideoSpec = DEFAULT_SPEC,
+    solar_sweep: bool = False,
+    black_first_panel: bool = True,
 ) -> tuple[Path, Path]:
     ffmpeg, ffprobe = require_dependencies()
     validate_configuration(dates, replicates, probes_per_panel, spec)
@@ -444,6 +645,9 @@ def assemble_video(
     manifest_path = video_dir / MANIFEST_NAME
     expected_frames = len(dates) * spec.frames_per_date
     if video_path.is_file() and manifest_path.is_file():
+        existing_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+        if bool(existing_manifest.get("solar_sweep", {}).get("enabled")) != solar_sweep:
+            raise RuntimeError(f"existing campaign video has the wrong solar mode: {video_path}")
         probe = _probe_video(video_path, ffprobe)
         stream = probe["streams"][0]
         if int(stream["nb_read_frames"]) != expected_frames:
@@ -453,7 +657,7 @@ def assemble_video(
         return video_path, manifest_path
 
     for date in dates:
-        validate_staged_prefix(root, date, replicates, probes_per_panel)
+        validate_staged_prefix(root, date, replicates, probes_per_panel, solar_sweep)
     scale_min, scale_max = _final_scale(sensor_rows)
     composite_dir = root / "composites"
     if composite_dir.exists():
@@ -470,9 +674,10 @@ def assemble_video(
         for replicate_number, allocated_frames in enumerate(allocations, start=1):
             scene_path = root / date / "scenes" / f"{replicate_number:04d}.png"
             means_path = root / date / "means" / f"{replicate_number:04d}.json"
-            values = json.loads(means_path.read_text(encoding="utf-8"))[
-                "illumination_running_means"
-            ]
+            payload = json.loads(means_path.read_text(encoding="utf-8"))
+            values = payload["illumination_running_means"]
+            solar_frame = payload.get("solar_sweep")
+            dashboard_status = payload.get("dashboard_status")
             global_index += 1
             composite_path = composite_dir / f"frame_{global_index:04d}.png"
             compose_frame(
@@ -486,9 +691,11 @@ def assemble_video(
                 scale_min,
                 scale_max,
                 spec,
+                solar_frame,
+                dashboard_status,
             )
             frame_sources = [composite_path] * allocated_frames
-            if replicate_number == 1:
+            if black_first_panel and replicate_number == 1:
                 black_path = composite_dir / f"frame_{global_index:04d}_black.png"
                 compose_frame(
                     scene_path,
@@ -501,6 +708,7 @@ def assemble_video(
                     scale_min,
                     scale_max,
                     spec,
+                    solar_frame,
                 )
                 frame_sources[0] = black_path
             for source in frame_sources:
@@ -574,6 +782,32 @@ def assemble_video(
             "bounces": render_bounces,
         },
         "presentation": DEFAULT_PROFILE.to_dict(),
+        "unique_scene_frames_per_date": replicates,
+        "encoded_frames_per_date": spec.frames_per_date,
+        "scientific_capture_isolation": (
+            "each engine batch completes all fixed-reference-sun PARBAR estimates "
+            "before any presentation-only geometry or moving-sun capture"
+        ),
+        "solar_sweep": {
+            "enabled": solar_sweep,
+            "site": asdict(DEFAULT_SOLAR_SITE) if solar_sweep else None,
+            "reference_sun_angles_restored_after_capture": list(
+                REFERENCE_SUN_ANGLES_DEGREES
+            ) if solar_sweep else None,
+            "dates": {
+                date: {
+                    "sunrise": solar_sweep_for_date(date, replicates)[0].to_dict(),
+                    "solar_noon_pair": [
+                        frame.to_dict()
+                        for frame in solar_sweep_for_date(date, replicates)[
+                            replicates // 2 - 1 : replicates // 2 + 1
+                        ]
+                    ],
+                    "sunset": solar_sweep_for_date(date, replicates)[-1].to_dict(),
+                }
+                for date in dates
+            } if solar_sweep else {},
+        },
         "frame_count": expected_frames,
         "duration_seconds": len(dates) * spec.seconds_per_date,
         "illumination_units": "relative simulated light; not calibrated physical PAR",

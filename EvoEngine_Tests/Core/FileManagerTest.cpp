@@ -37,7 +37,11 @@ class ThumbnailProbeAsset final : public IAsset {
  public:
   static bool RegisterAssetIoHandlers() {
     return Serialization::RegisterAssetIoHandler<ThumbnailProbeAsset>(
-        {},
+        [](const ThumbnailProbeAsset&, const std::filesystem::path& path) {
+          std::ofstream asset_file(path, std::ios::trunc);
+          asset_file << "thumbnail probe saved";
+          return asset_file.good();
+        },
         [](ThumbnailProbeAsset&, const std::filesystem::path&) {
           ++ThumbnailProbeLoadCount();
           return true;
@@ -300,7 +304,7 @@ TEST(FileManager, ProjectScanDefersSceneAutoLoad) {
   EXPECT_EQ(snapshot.completed + snapshot.failed + snapshot.cancelled, 1);
 }
 
-TEST(FileManager, ThumbnailLookupCanAvoidStartingAssetLoad) {
+TEST(FileManager, ThumbnailLookupDoesNotReloadAnAssetAfterItsOwnSave) {
   ThumbnailProbeLoadCount() = 0;
   TempFileManagerProject project;
   WriteThumbnailProbeAssetFixture(project);
@@ -330,6 +334,19 @@ TEST(FileManager, ThumbnailLookupCanAvoidStartingAssetLoad) {
 
   (void)file->GetThumbnail(true);
   EXPECT_TRUE(WaitForThumbnailProbeLoad(std::chrono::seconds(5)));
+
+  const auto asset = AssetManager::GetAsset<ThumbnailProbeAsset>(Handle(kThumbnailProbeAssetHandle));
+  ASSERT_TRUE(asset);
+  const auto load_count = ThumbnailProbeLoadCount().load();
+  std::this_thread::sleep_for(std::chrono::milliseconds(20));
+  ASSERT_TRUE(asset->Save());
+  for (size_t i = 0; i < 16; ++i) {
+    (void)file->GetThumbnail(true);
+    AssetManager::ExecuteMainThreadAssetTasks(1);
+    Jobs::ExecuteMainThreadJobs(1);
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  }
+  EXPECT_EQ(ThumbnailProbeLoadCount().load(), load_count);
 }
 
 TEST(ProjectManager, CreateFolderGeneratesUniqueChildFolders) {

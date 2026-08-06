@@ -9,6 +9,8 @@ bool IAsset::Save() {
     return false;
   if (const auto path = GetAbsolutePath(); Serialization::SaveAsset(*this, path)) {
     saved_ = true;
+    if (const auto file = file_record_.lock())
+      file->InvalidateThumbnail();
     return true;
   }
   return false;

@@ -39,6 +39,23 @@ class RunningStatsTest(unittest.TestCase):
 
 
 class CampaignSeedTest(unittest.TestCase):
+    def test_runtime_metadata_snapshot_restores_deleted_engine_files(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "project.eveproj"
+            metadata = root / "Assets" / "ManualAssets" / "Materials.evefoldermeta"
+            project.write_bytes(b"project")
+            metadata.parent.mkdir(parents=True)
+            metadata.write_bytes(b"materials")
+            snapshot = handoff.snapshot_runtime_metadata(project)
+            project.write_bytes(b"changed")
+            metadata.unlink()
+
+            handoff.restore_runtime_metadata(snapshot)
+
+            self.assertEqual(b"project", project.read_bytes())
+            self.assertEqual(b"materials", metadata.read_bytes())
+
     def test_video_render_settings_are_independent_from_parbar_settings(self) -> None:
         args = handoff.build_parser().parse_args(
             [
@@ -366,7 +383,13 @@ class EngineBatchTest(unittest.TestCase):
                 rows = handoff.sensor_rows_with_workers(args, {date: {}})
 
         self.assertEqual(6, len(rows))
-        self.assertEqual([mock.call(root / "video_staging", date, 1, 1), mock.call(root / "video_staging", date, 2, 1)], validate.call_args_list)
+        self.assertEqual(
+            [
+                mock.call(root / "video_staging", date, 1, 1, False, 2),
+                mock.call(root / "video_staging", date, 2, 1, False, 2),
+            ],
+            validate.call_args_list,
+        )
 
     def test_parent_terminates_worker_when_log_streaming_is_interrupted(self) -> None:
         class InterruptedOutput:

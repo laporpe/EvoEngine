@@ -9,7 +9,7 @@ import sys
 from pathlib import Path
 
 import bpy
-from mathutils import Vector
+from mathutils import Matrix, Vector
 
 
 LEAF_TEXTURES = {
@@ -19,6 +19,61 @@ LEAF_TEXTURES = {
     "ao": ("sorghum_lsystem_leaf_variants_ao.png", "sorghum_leaf_stem_atlas_ao.png"),
     "height": ("sorghum_lsystem_leaf_variants_height.png",),
     "metallic": ("sorghum_lsystem_leaf_variants_metallic.png", "sorghum_leaf_stem_atlas_metallic.png"),
+}
+
+LEAF_PRINCIPLED_DEFAULTS = {
+    "Metallic": 0.0,
+    "Roughness": 0.55,
+    "Subsurface Weight": 0.06,
+    "Subsurface Scale": 0.009,
+    "Subsurface Radius": (0.55, 0.78, 0.36),
+    "Specular IOR Level": 0.35,
+    "Sheen Weight": 0.07,
+    "Sheen Roughness": 0.5,
+}
+
+LEAF_COLOR_DEFAULTS = {
+    "Saturation": 1.05,
+    "Value": 0.88,
+}
+
+# Blender 5 exposes the Nishita atmosphere as single- or multiple-scattering
+# Sky Texture modes. These reference-photo-matched values retain the otherwise
+# easy-to-miss altitude default.
+NISHITA_SKY_DEFAULTS = {
+    "sky_type": "MULTIPLE_SCATTERING",
+    "sun_disc": True,
+    "sun_elevation": math.radians(55.0),
+    "sun_rotation": math.radians(135.0),
+    "sun_intensity": 0.35,
+    "sun_size": math.radians(0.53),
+    "altitude": 100.0,
+    "air_density": 1.0,
+    "aerosol_density": 0.05,
+    "ozone_density": 1.0,
+}
+WORLD_LIGHTING_STRENGTH = 0.65
+WORLD_CAMERA_STRENGTH = 1.40
+
+# Author-approved fixed field camera, captured from the manually composed
+# 2021-08-18 Blender scene. Keep this absolute across dates so growth-stage
+# comparisons do not acquire camera motion from date-dependent canopy bounds.
+CAMERA_MATRIX_WORLD = (
+    (0.5074188113212585, 0.05051324889063835, -0.8602177500724792, -4.723331451416016),
+    (-0.8616995811462402, 0.02965959720313549, -0.506551206111908, 4.0044684410095215),
+    (-0.00007383651973214, 0.9982829093933105, 0.05857708305120468, 1.859767198562622),
+    (0.0, 0.0, 0.0, 1.0),
+)
+CAMERA_DATA_DEFAULTS = {
+    "type": "PERSP",
+    "lens": 32.0,
+    "sensor_fit": "AUTO",
+    "sensor_width": 36.0,
+    "sensor_height": 24.0,
+    "shift_x": 0.0,
+    "shift_y": 0.0,
+    "clip_start": 0.1,
+    "clip_end": 96.27936553955078,
 }
 
 
@@ -84,6 +139,7 @@ def set_input_default(node: bpy.types.Node, names: tuple[str, ...], value) -> No
         if name in node.inputs:
             node.inputs[name].default_value = value
             return
+    raise RuntimeError(f"{node.bl_idname} is missing required input: {' or '.join(names)}")
 
 
 def link_image(material: bpy.types.Material, image: bpy.types.Image, label: str) -> bpy.types.Node:
@@ -102,20 +158,16 @@ def enable_material_displacement(material: bpy.types.Material, max_displacement:
 
 def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str, str | None]]:
     material, bsdf = new_principled_material("SWEEP_LSystem_Leaf_Cycles")
+    bsdf.name = "SWEEP Leaf Principled BSDF"
+    bsdf.label = "authored leaf SSS and surface response"
     material.blend_method = "HASHED"
     material.use_screen_refraction = False
     material.use_backface_culling = False
     enable_material_displacement(material, 0.003)
     if hasattr(material, "show_transparent_back"):
         material.show_transparent_back = True
-    set_input_default(bsdf, ("Metallic",), 0.0)
-    set_input_default(bsdf, ("Roughness",), 0.55)
-    set_input_default(bsdf, ("Subsurface Weight",), 0.14)
-    set_input_default(bsdf, ("Subsurface Scale",), 0.018)
-    set_input_default(bsdf, ("Subsurface Radius",), (0.55, 0.78, 0.36))
-    set_input_default(bsdf, ("Specular IOR Level",), 0.72)
-    set_input_default(bsdf, ("Sheen Weight",), 0.18)
-    set_input_default(bsdf, ("Sheen Roughness",), 0.5)
+    for socket_name, value in LEAF_PRINCIPLED_DEFAULTS.items():
+        set_input_default(bsdf, (socket_name,), value)
 
     paths = {key: find_texture(texture_dir, names) for key, names in LEAF_TEXTURES.items()}
     images = {
@@ -144,6 +196,14 @@ def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str
             links.new(albedo.outputs["Color"], multiply.inputs["A"])
             links.new(ao.outputs["Color"], multiply.inputs["B"])
             color_output = multiply.outputs["Result"]
+        color_calibration = material.node_tree.nodes.new("ShaderNodeHueSaturation")
+        color_calibration.name = "SWEEP Leaf Reference Color Calibration"
+        color_calibration.label = "SWEEP reference-photo color calibration"
+        color_calibration.location = (-100, 130)
+        for socket_name, value in LEAF_COLOR_DEFAULTS.items():
+            color_calibration.inputs[socket_name].default_value = value
+        links.new(color_output, color_calibration.inputs["Color"])
+        color_output = color_calibration.outputs["Color"]
         links.new(color_output, bsdf.inputs["Base Color"])
         if "Alpha" in bsdf.inputs:
             links.new(albedo.outputs["Alpha"], bsdf.inputs["Alpha"])
@@ -164,6 +224,7 @@ def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str
         normal_tex = link_image(material, images["normal"], "normal")
         normal_tex.location = (-760, -580)
         normal = material.node_tree.nodes.new("ShaderNodeNormalMap")
+        normal.label = "authored leaf normal"
         normal.location = (-420, -560)
         normal.inputs["Strength"].default_value = 0.6
         links.new(normal_tex.outputs["Color"], normal.inputs["Color"])
@@ -172,6 +233,7 @@ def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str
         height_tex = link_image(material, images["height"], "height")
         height_tex.location = (-760, -790)
         bump = material.node_tree.nodes.new("ShaderNodeBump")
+        bump.label = "authored leaf height micro-bump"
         bump.location = (-140, -620)
         bump.inputs["Strength"].default_value = 0.012
         bump.inputs["Distance"].default_value = 0.004
@@ -182,6 +244,7 @@ def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str
     texcoord = material.node_tree.nodes.new("ShaderNodeTexCoord")
     texcoord.location = (-1180, -1010)
     mapping = material.node_tree.nodes.new("ShaderNodeMapping")
+    mapping.label = "authored elongated leaf grain mapping"
     mapping.location = (-980, -1010)
     if "Scale" in mapping.inputs:
         mapping.inputs["Scale"].default_value = (0.22, 9.0, 1.0)
@@ -192,14 +255,17 @@ def build_leaf_material(texture_dir: Path) -> tuple[bpy.types.Material, dict[str
     grain.inputs["Detail"].default_value = 14.0
     grain.inputs["Roughness"].default_value = 0.62
     ramp = material.node_tree.nodes.new("ShaderNodeValToRGB")
+    ramp.label = "authored elongated leaf grain ramp"
     ramp.location = (-500, -1010)
     ramp.color_ramp.elements[0].position = 0.32
     ramp.color_ramp.elements[1].position = 0.86
     leaf_bump = material.node_tree.nodes.new("ShaderNodeBump")
+    leaf_bump.label = "authored elongated leaf grain bump"
     leaf_bump.location = (-130, -930)
     leaf_bump.inputs["Strength"].default_value = 0.008
     leaf_bump.inputs["Distance"].default_value = 0.003
     leaf_displacement = material.node_tree.nodes.new("ShaderNodeDisplacement")
+    leaf_displacement.label = "authored leaf micro-displacement"
     leaf_displacement.location = (260, -890)
     leaf_displacement.inputs["Scale"].default_value = 0.001
     leaf_displacement.inputs["Midlevel"].default_value = 0.5
@@ -284,7 +350,12 @@ def is_parbar_panel_object(obj: bpy.types.Object) -> bool:
 
 def is_parbar_long_bar_object(obj: bpy.types.Object) -> bool:
     name = obj.name.lower()
-    return name == "model" or name.startswith("model.") and not name.startswith("model.003")
+    return (
+        name == "model"
+        or name.startswith("model.") and not name.startswith("model.003")
+        or name.startswith("parbar_pawaga_")
+        or name.startswith("parbar_btx_")
+    )
 
 
 def assign_material(obj: bpy.types.Object, material: bpy.types.Material) -> None:
@@ -367,12 +438,21 @@ def configure_cycles(samples: int, resolution_x: int, resolution_y: int) -> None
     scene.cycles.use_denoising = True
     scene.render.resolution_x = resolution_x
     scene.render.resolution_y = resolution_y
-    view_transforms = {item.identifier for item in scene.view_settings.bl_rna.properties["view_transform"].enum_items}
-    scene.view_settings.view_transform = "AgX" if "AgX" in view_transforms else "Filmic"
-    looks = {item.identifier for item in scene.view_settings.bl_rna.properties["look"].enum_items}
-    if "Medium High Contrast" in looks:
-        scene.view_settings.look = "Medium High Contrast"
-    scene.view_settings.exposure = -0.2
+    try:
+        scene.view_settings.view_transform = "AgX"
+    except TypeError:
+        scene.view_settings.view_transform = "Filmic"
+    for look in ("AgX - Medium High Contrast", "Medium High Contrast"):
+        try:
+            scene.view_settings.look = look
+            break
+        except TypeError:
+            continue
+    else:
+        # Make the compatibility fallback explicit so reopening the file cannot
+        # inherit a workstation default.
+        scene.view_settings.look = "None"
+    scene.view_settings.exposure = -0.9
     scene.view_settings.gamma = 1.0
     try:
         preferences = bpy.context.preferences.addons["cycles"].preferences
@@ -394,11 +474,6 @@ def visible_mesh_bounds(objects: list[bpy.types.Object] | None = None) -> tuple[
     minimum = Vector((min(point.x for point in points), min(point.y for point in points), min(point.z for point in points)))
     maximum = Vector((max(point.x for point in points), max(point.y for point in points), max(point.z for point in points)))
     return minimum, maximum
-
-
-def look_at(obj: bpy.types.Object, target: Vector) -> None:
-    direction = target - obj.location
-    obj.rotation_euler = direction.to_track_quat("-Z", "Y").to_euler()
 
 
 def plant_objects() -> list[bpy.types.Object]:
@@ -424,32 +499,43 @@ def configure_camera() -> dict[str, object]:
     plants = plant_objects()
     framed = framing_objects() or plants
     minimum, maximum = visible_mesh_bounds(framed if framed else None)
-    center = (minimum + maximum) * 0.5
-    diagonal = max((maximum - minimum).length, 1.0)
     camera = next((obj for obj in bpy.context.scene.objects if obj.type == "CAMERA"), None)
     if camera is None:
         bpy.ops.object.camera_add()
         camera = bpy.context.object
     camera.name = "Cycles Paper Camera"
-    camera.location = center + Vector((-0.82 * diagonal, -0.88 * diagonal, 0.58 * diagonal))
-    look_at(camera, center + Vector((0.0, 0.0, 0.08 * diagonal)))
-    camera.data.lens = 32.0
-    camera.data.clip_end = diagonal * 8.0
+    camera.parent = None
+    camera.rotation_mode = "XYZ"
+    camera.matrix_world = Matrix(CAMERA_MATRIX_WORLD)
+    for property_name, value in CAMERA_DATA_DEFAULTS.items():
+        set_required_property(camera.data, property_name, value)
+    camera.data.dof.use_dof = False
     bpy.context.scene.camera = camera
     for obj in bpy.context.scene.objects:
         obj.select_set(False)
     for obj in plants:
         obj.select_set(True)
     bpy.context.view_layer.objects.active = plants[0] if plants else camera
-    return {"framed_objects": len(framed), "plant_objects": len(plants), "bounds_min": list(minimum), "bounds_max": list(maximum)}
+    return {
+        "framed_objects": len(framed),
+        "plant_objects": len(plants),
+        "bounds_min": list(minimum),
+        "bounds_max": list(maximum),
+        "matrix_world": [list(row) for row in camera.matrix_world],
+        "location": list(camera.location),
+        "rotation_euler": list(camera.rotation_euler),
+        "data": {name: getattr(camera.data, name) for name in CAMERA_DATA_DEFAULTS},
+        "dof_use": camera.data.dof.use_dof,
+    }
 
 
-def set_property_if_present(obj: object, name: str, value: object) -> None:
-    if hasattr(obj, name):
-        setattr(obj, name, value)
+def set_required_property(obj: object, name: str, value: object) -> None:
+    if not hasattr(obj, name):
+        raise RuntimeError(f"{type(obj).__name__} is missing required property: {name}")
+    setattr(obj, name, value)
 
 
-def configure_high_noon_world() -> None:
+def configure_reference_photo_world() -> dict[str, object]:
     for obj in [obj for obj in bpy.context.scene.objects if obj.type == "LIGHT" and obj.data.type == "SUN"]:
         bpy.data.objects.remove(obj, do_unlink=True)
     world = bpy.context.scene.world or bpy.data.worlds.new("SWEEP High Noon Sky World")
@@ -458,23 +544,42 @@ def configure_high_noon_world() -> None:
     nodes = world.node_tree.nodes
     nodes.clear()
     output = nodes.new("ShaderNodeOutputWorld")
-    output.location = (520, 0)
+    output.location = (720, 0)
+    mix = nodes.new("ShaderNodeMixShader")
+    mix.label = "SWEEP camera/environment world mix"
+    mix.location = (500, 0)
     background = nodes.new("ShaderNodeBackground")
-    background.location = (250, 0)
+    background.label = "SWEEP environment lighting"
+    background.location = (250, 80)
+    camera_background = nodes.new("ShaderNodeBackground")
+    camera_background.label = "SWEEP camera-visible sky"
+    camera_background.location = (250, -120)
+    light_path = nodes.new("ShaderNodeLightPath")
+    light_path.label = "SWEEP camera-ray sky selector"
+    light_path.location = (250, -320)
     sky = nodes.new("ShaderNodeTexSky")
     sky.location = (-80, 0)
-    sky.sky_type = "MULTIPLE_SCATTERING"
-    sky.sun_disc = True
-    sky.sun_elevation = math.radians(90.0)
-    sky.sun_rotation = 0.0
-    set_property_if_present(sky, "sun_intensity", 0.1)
-    set_property_if_present(sky, "sun_size", 0.0)
-    set_property_if_present(sky, "air_density", 1.0)
-    set_property_if_present(sky, "aerosol_density", 0.05)
-    set_property_if_present(sky, "ozone_density", 1.0)
-    background.inputs["Strength"].default_value = 1.0
+    sky.label = "Nishita multiple-scattering reference-photo sky"
+    for property_name, value in NISHITA_SKY_DEFAULTS.items():
+        set_required_property(sky, property_name, value)
+    background.inputs["Strength"].default_value = WORLD_LIGHTING_STRENGTH
+    camera_background.inputs["Strength"].default_value = WORLD_CAMERA_STRENGTH
     world.node_tree.links.new(sky.outputs["Color"], background.inputs["Color"])
-    world.node_tree.links.new(background.outputs["Background"], output.inputs["Surface"])
+    world.node_tree.links.new(sky.outputs["Color"], camera_background.inputs["Color"])
+    world.node_tree.links.new(light_path.outputs["Is Camera Ray"], mix.inputs[0])
+    world.node_tree.links.new(background.outputs["Background"], mix.inputs[1])
+    world.node_tree.links.new(camera_background.outputs["Background"], mix.inputs[2])
+    world.node_tree.links.new(mix.outputs["Shader"], output.inputs["Surface"])
+    return {
+        "model": "Nishita",
+        **{name: getattr(sky, name) for name in NISHITA_SKY_DEFAULTS},
+        "sun_elevation_deg": math.degrees(sky.sun_elevation),
+        "background_strength": background.inputs["Strength"].default_value,
+        "camera_background_strength": camera_background.inputs["Strength"].default_value,
+        "sun_objects": sum(
+            1 for obj in bpy.context.scene.objects if obj.type == "LIGHT" and obj.data.type == "SUN"
+        ),
+    }
 
 
 def report_path(output_blend: Path) -> Path:
@@ -495,7 +600,7 @@ def main() -> None:
     material_report = configure_materials(texture_dir)
     configure_cycles(args.samples, args.resolution_x, args.resolution_y)
     camera_report = configure_camera()
-    configure_high_noon_world()
+    world_report = configure_reference_photo_world()
 
     args.output_blend.parent.mkdir(parents=True, exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=str(args.output_blend))
@@ -516,17 +621,11 @@ def main() -> None:
         "mesh_objects": sum(1 for obj in bpy.context.scene.objects if obj.type == "MESH"),
         "materials": len(bpy.data.materials),
         "camera": camera_report,
-        "world": {
-            "sky_type": "MULTIPLE_SCATTERING",
-            "sun_elevation_deg": 90.0,
-            "sun_rotation": 0.0,
-            "sun_intensity": 0.1,
-            "sun_size": 0.0,
-            "sun_objects_removed": True,
-        },
+        "world": world_report,
         **material_report,
     }
     report_path(args.output_blend).write_text(json.dumps(report, indent=2), encoding="utf-8")
+    print(f"SWEEP_BLENDER_PREPARE passed output={args.output_blend}")
 
 
 if __name__ == "__main__":

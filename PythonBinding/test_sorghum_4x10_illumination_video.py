@@ -11,9 +11,135 @@ from types import SimpleNamespace
 from PIL import Image
 
 import sorghum_4x10_illumination_video as video
+import sorghum_recompose_4x10_solar_video as recompose
 
 
 class CampaignVideoTest(unittest.TestCase):
+    def test_recomposition_final_values_follow_visible_panel_order(self) -> None:
+        rows = []
+        for panel, (cultivar, level) in enumerate(video.PANEL_ORDER):
+            for probe in range(1, 3):
+                rows.append(
+                    {
+                        "date": "2021-07-01",
+                        "cultivar": cultivar,
+                        "sensor_bar_level": level,
+                        "probe_number": str(probe),
+                        "illumination_total_simulated_mean": str(panel * 10 + probe),
+                    }
+                )
+        rows.reverse()
+
+        self.assertEqual(
+            [1.0, 2.0, 11.0, 12.0, 21.0, 22.0, 31.0, 32.0, 41.0, 42.0, 51.0, 52.0],
+            recompose.final_values(rows, "2021-07-01", 2),
+        )
+
+    def test_arizona_solar_sweep_has_sunrise_noon_and_sunset(self) -> None:
+        peak_elevations = []
+        for date in ("2021-07-01", "2021-08-18", "2021-09-02"):
+            frames = video.solar_sweep_for_date(date, 100)
+            peak_elevations.append(max(frame.elevation_degrees for frame in frames))
+            self.assertEqual(100, len(frames))
+            self.assertAlmostEqual(-0.833, frames[0].elevation_degrees, places=3)
+            self.assertAlmostEqual(-0.833, frames[-1].elevation_degrees, places=3)
+            self.assertTrue(
+                all(
+                    earlier.local_minutes < later.local_minutes
+                    for earlier, later in zip(frames, frames[1:])
+                )
+            )
+            self.assertLess(frames[0].azimuth_degrees, 120.0)
+            self.assertGreater(frames[-1].azimuth_degrees, 240.0)
+            self.assertLess(
+                abs(
+                    (frames[49].azimuth_degrees + frames[50].azimuth_degrees)
+                    * 0.5
+                    - 180.0
+                ),
+                0.1,
+            )
+        self.assertGreater(peak_elevations[0], peak_elevations[1])
+        self.assertGreater(peak_elevations[1], peak_elevations[2])
+
+    def test_solar_capture_restores_reference_scientific_sun(self) -> None:
+        class Vector:
+            x = 0.0
+            y = 0.0
+            z = 0.0
+
+        class Evo:
+            Vec3 = Vector
+
+            def __init__(self) -> None:
+                self.sun_angles = []
+
+            def SetSunDirection(self, value) -> None:
+                self.sun_angles.append((value.x, value.y, value.z))
+
+            def LoopFrames(self, _count: int) -> None:
+                pass
+
+            def CaptureCurrentSceneRayTraced(
+                self, width, height, output, _samples, _bounces, _gamma
+            ) -> bool:
+                Image.new("RGB", (width, height), (40, 90, 130)).save(output)
+                return True
+
+        spec = video.VideoSpec(width=64, height=80, fps=20, seconds_per_date=5)
+        solar = video.solar_frame_for_replicate("2021-08-18", 50, 100)
+        with tempfile.TemporaryDirectory() as directory:
+            evo = Evo()
+            root = Path(directory)
+            video.capture_realization(
+                evo,
+                root,
+                "2021-08-18",
+                50,
+                [1.0] * len(video.PANEL_ORDER),
+                1,
+                1,
+                0,
+                spec,
+                solar,
+            )
+            payload = json.loads(
+                (root / "2021-08-18" / "means" / "0050.json").read_text(
+                    encoding="utf-8"
+                )
+            )
+        self.assertEqual(solar.sun_angles_degrees, evo.sun_angles[0])
+        self.assertEqual(video.REFERENCE_SUN_ANGLES_DEGREES, evo.sun_angles[-1])
+        self.assertEqual(solar.to_dict(), payload["solar_sweep"])
+
+    def test_partial_resume_validates_against_full_solar_schedule(self) -> None:
+        date = "2021-07-01"
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            for replicate in (1, 2):
+                scene = root / date / "scenes" / f"{replicate:04d}.png"
+                means = root / date / "means" / f"{replicate:04d}.json"
+                scene.parent.mkdir(parents=True, exist_ok=True)
+                means.parent.mkdir(parents=True, exist_ok=True)
+                scene.touch()
+                means.write_text(
+                    json.dumps(
+                        {
+                            "date": date,
+                            "replicate_number": replicate,
+                            "probes_per_panel": 1,
+                            "illumination_running_means": [1.0]
+                            * len(video.PANEL_ORDER),
+                            "solar_sweep": video.solar_frame_for_replicate(
+                                date, replicate, 100
+                            ).to_dict(),
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+
+            video.validate_staged_prefix(root, date, 2, 1, True, 100)
+
     def test_fixed_camera_accepts_remaining_generated_plants(self) -> None:
         def point(x: float, y: float, z: float) -> SimpleNamespace:
             return SimpleNamespace(x=x, y=y, z=z)

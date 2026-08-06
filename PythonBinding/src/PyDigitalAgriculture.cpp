@@ -1349,7 +1349,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
   m.def("CaptureCurrentSceneRayTraced", &CaptureCurrentSceneRayTraced, py::arg("resolution_x"), py::arg("resolution_y"),
         py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f);
   m.def("ConfigurePresentationGroundExtension", &ConfigurePresentationGroundExtension, py::arg("enabled"),
-        py::arg("size_m") = 160.0f, py::arg("texture_repeat_m") = 4.0f);
+        py::arg("size_m") = 160.0f, py::arg("texture_repeat_m") = 2.0f,
+        py::arg("grid_spacing_m") = 1.0f);
   m.def("GetRayTracerBuildCounters", &GetRayTracerBuildCounters);
   m.def("GrowSorghumLsPlantsToAdulthood", &GrowSorghumLsPlantsToAdulthood, py::arg("seed_base") = -1,
         py::arg("cultivar_filter") = "", py::arg("reuse_geometry_entities") = false,
@@ -2112,7 +2113,8 @@ bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, 
 }
 
 size_t PyDigitalAgriculture::ConfigurePresentationGroundExtension(const bool enabled, const float size_m,
-                                                                  const float texture_repeat_m) {
+                                                                  const float texture_repeat_m,
+                                                                  const float grid_spacing_m) {
   const auto scene = ApplicationContext::Get().GetActiveScene();
   if (!scene) {
     return 0;
@@ -2131,7 +2133,8 @@ size_t PyDigitalAgriculture::ConfigurePresentationGroundExtension(const bool ena
   if (scene->IsEntityValid(extension)) {
     return 1;
   }
-  if (!std::isfinite(size_m) || !std::isfinite(texture_repeat_m) || size_m <= 0.0f || texture_repeat_m <= 0.0f) {
+  if (!std::isfinite(size_m) || !std::isfinite(texture_repeat_m) || !std::isfinite(grid_spacing_m) ||
+      size_m <= 0.0f || texture_repeat_m <= 0.0f || grid_spacing_m <= 0.0f) {
     return 0;
   }
 
@@ -2156,24 +2159,48 @@ size_t PyDigitalAgriculture::ConfigurePresentationGroundExtension(const bool ena
   const float half_size = size_m * 0.5f;
   const glm::vec2 center((minimum.x + maximum.x) * 0.5f, (minimum.z + maximum.z) * 0.5f);
   const float y = minimum.y - 0.015f;
-  const float uv_extent = size_m / texture_repeat_m;
-  std::vector<Vertex> vertices(4);
-  const std::array<glm::vec3, 4> positions{
-      glm::vec3(center.x - half_size, y, center.y - half_size),
-      glm::vec3(center.x + half_size, y, center.y - half_size),
-      glm::vec3(center.x + half_size, y, center.y + half_size),
-      glm::vec3(center.x - half_size, y, center.y + half_size),
-  };
-  const std::array<glm::vec2, 4> tex_coords{
-      glm::vec2(0.0f, 0.0f), glm::vec2(uv_extent, 0.0f), glm::vec2(uv_extent, uv_extent),
-      glm::vec2(0.0f, uv_extent)};
-  for (size_t index = 0; index < vertices.size(); ++index) {
-    vertices[index].position = positions[index];
-    vertices[index].normal = glm::vec3(0.0f, 1.0f, 0.0f);
-    vertices[index].tangent = glm::vec3(1.0f, 0.0f, 0.0f);
-    vertices[index].tex_coord = tex_coords[index];
+  const double requested_cells = std::ceil(static_cast<double>(size_m) / static_cast<double>(grid_spacing_m));
+  constexpr size_t kMaximumGridCells = 2048;
+  if (requested_cells < 1.0 || requested_cells > static_cast<double>(kMaximumGridCells)) {
+    return 0;
   }
-  const std::vector<glm::uvec3> triangles{glm::uvec3(0, 2, 1), glm::uvec3(0, 3, 2)};
+  const size_t grid_cells = static_cast<size_t>(requested_cells);
+  const size_t grid_resolution = grid_cells + 1;
+  const float cell_size = size_m / static_cast<float>(grid_cells);
+  const glm::mat4 inverse_ground = glm::inverse(ground_transform.value);
+  constexpr float kTwoPi = 6.28318530717958647692f;
+  const auto authored_uv = [&](const glm::vec3& world_position) {
+    const glm::vec3 local_position = glm::vec3(inverse_ground * glm::vec4(world_position, 1.0f));
+    return glm::vec2(
+        local_position.x / texture_repeat_m + 0.16f * std::sin(kTwoPi * local_position.z / 7.3f) +
+            0.07f * std::sin(kTwoPi * (local_position.x + local_position.z) / 3.9f),
+        local_position.z / texture_repeat_m + 0.14f * std::sin(kTwoPi * local_position.x / 8.1f) -
+            0.06f * std::sin(kTwoPi * (local_position.x - local_position.z) / 4.7f));
+  };
+
+  std::vector<Vertex> vertices(grid_resolution * grid_resolution);
+  for (size_t row = 0; row < grid_resolution; ++row) {
+    for (size_t column = 0; column < grid_resolution; ++column) {
+      auto& vertex = vertices[row * grid_resolution + column];
+      vertex.position = glm::vec3(center.x - half_size + static_cast<float>(column) * cell_size, y,
+                                  center.y - half_size + static_cast<float>(row) * cell_size);
+      vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+      vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+      vertex.tex_coord = authored_uv(vertex.position);
+    }
+  }
+  std::vector<glm::uvec3> triangles;
+  triangles.reserve(grid_cells * grid_cells * 2);
+  for (size_t row = 0; row < grid_cells; ++row) {
+    for (size_t column = 0; column < grid_cells; ++column) {
+      const auto lower_left = static_cast<unsigned int>(row * grid_resolution + column);
+      const auto lower_right = lower_left + 1;
+      const auto upper_left = static_cast<unsigned int>((row + 1) * grid_resolution + column);
+      const auto upper_right = upper_left + 1;
+      triangles.emplace_back(lower_left, upper_right, lower_right);
+      triangles.emplace_back(lower_left, upper_left, upper_right);
+    }
+  }
   const auto mesh = AssetManager::CreateTemporaryAsset<Mesh>();
   VertexAttributes attributes{};
   attributes.normal = true;
