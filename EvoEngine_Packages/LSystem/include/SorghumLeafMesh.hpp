@@ -21,6 +21,7 @@ struct SorghumLeafMeshSettings {
   bool enable_leaf_sheath = true;
   float leaf_width_scale = 1.0f;
   float leaf_thickness = 0.001f;
+  glm::vec3 gravity_local_m_s2 = glm::vec3(0.0f, -9.80665f, 0.0f);
 };
 
 struct SorghumLeafAtlasLayout {
@@ -103,13 +104,15 @@ class SorghumSplineSegment {
   glm::vec3 front = glm::vec3(0.0f, 1.0f, 0.0f);
   glm::vec3 up = glm::vec3(0.0f, 0.0f, 1.0f);
   float radius = 0.005f;
+  float cross_section_aspect_ratio = 1.0f;
   float theta = 180.0f;
   float left_height_offset = 0.0f;
   float right_height_offset = 0.0f;
 
   SorghumSplineSegment() = default;
   SorghumSplineSegment(const glm::vec3& position, const glm::vec3& up, const glm::vec3& front, float radius,
-                       float theta, float left_height_offset = 0.0f, float right_height_offset = 0.0f);
+                       float theta, float left_height_offset = 0.0f, float right_height_offset = 0.0f,
+                       float cross_section_aspect_ratio = 1.0f);
 
   [[nodiscard]] glm::vec3 GetLeafPoint(float angle_deg) const;
   [[nodiscard]] glm::vec3 GetStemPoint(float angle_deg) const;

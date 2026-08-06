@@ -449,7 +449,9 @@ void SorghumLS::GrowToTargetGDD(const bool uncapped_growth, const uint32_t max_g
   }
 
   growth_model.GrowToGDD(target_gdd, uncapped_growth ? 0u : max_growth_steps);
-  growth_model.FinalizeSnapshotMorphology();
+  if (descriptor->finalize_snapshot_morphology) {
+    growth_model.FinalizeSnapshotMorphology();
+  }
   last_grow_seconds = GetApplication().GetTimes().Now() - grow_start;
 
   const bool no_growth_step = !reinitialized && growth_model.last_growth_steps == 0;
@@ -512,6 +514,9 @@ void SorghumLS::RebuildGeometry() {
   const auto color_mode = GetGlobalColorMode();
   const glm::vec4 instance_color = HashToColor(owner.GetIndex());
   const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
+  auto current_leaf_mesh_settings = leaf_mesh_settings;
+  current_leaf_mesh_settings.gravity_local_m_s2 =
+      glm::conjugate(scene->GetDataComponent<GlobalTransform>(owner).GetRotation()) * glm::vec3(0.0f, -9.80665f, 0.0f);
   SorghumLeafAtlasLayout base_leaf_atlas_layout;
   if (descriptor) {
     base_leaf_atlas_layout.variant_columns = descriptor->leaf_atlas_variant_columns;
@@ -694,7 +699,7 @@ void SorghumLS::RebuildGeometry() {
       }
 
       const double spline_start = times.Now();
-      BuildLeafSplineFromState(leaf, stem_ctx, growth_model.sampled, leaf_mesh_settings, leaf_spline);
+      BuildLeafSplineFromState(leaf, stem_ctx, growth_model.sampled, current_leaf_mesh_settings, leaf_spline);
       last_leaf_spline_seconds += times.Now() - spline_start;
 
       const double mesh_start = times.Now();
@@ -762,6 +767,11 @@ void SorghumLS::RebuildGeometry() {
       material->material_properties.metallic = descriptor ? descriptor->leaf_material_metallic : 0.0f;
       material->material_properties.roughness = descriptor ? descriptor->leaf_material_roughness : 0.72f;
       material->material_properties.specular = descriptor ? descriptor->leaf_material_specular : 0.45f;
+      material->material_properties.subsurface_factor = descriptor ? descriptor->leaf_material_subsurface_factor : 0.0f;
+      material->material_properties.subsurface_color =
+          descriptor ? descriptor->leaf_material_subsurface_color : glm::vec3(0.26f, 0.52f, 0.18f);
+      material->material_properties.subsurface_radius =
+          descriptor ? descriptor->leaf_material_subsurface_radius : glm::vec3(0.001f);
       material->material_properties.emission = 0.0f;
     }
 

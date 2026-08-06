@@ -54,6 +54,10 @@ target_compile_definitions(EvoEngine_Tests
 	)
 add_dependencies(EvoEngine_Tests PyEvoEngine)
 evoengine_copy_resources(EvoEngine_Tests "$<TARGET_FILE_DIR:EvoEngine_Tests>")
+add_custom_command(TARGET EvoEngine_Tests POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		$<TARGET_FILE:LSystemPackage> $<TARGET_FILE_DIR:EvoEngine_Tests>
+	VERBATIM)
 set_property(TARGET EvoEngine_Tests PROPERTY FOLDER Tests)
 
 add_custom_target(EvoEngine_RenderTests)
@@ -118,6 +122,11 @@ gtest_discover_tests(EvoEngine_Tests
 gtest_discover_tests(EvoEngine_Tests
 	WORKING_DIRECTORY "$<TARGET_FILE_DIR:EvoEngine_Tests>"
 	TEST_FILTER LSystemLeafAtlasUv.*
+	PROPERTIES LABELS "core,lsystem,geometry"
+	)
+gtest_discover_tests(EvoEngine_Tests
+	WORKING_DIRECTORY "$<TARGET_FILE_DIR:EvoEngine_Tests>"
+	TEST_FILTER LSystemLeafMorphology.*:LSystemSorghumTillers.*
 	PROPERTIES LABELS "core,lsystem,geometry"
 	)
 gtest_discover_tests(EvoEngine_Tests

@@ -819,13 +819,18 @@ void ConfigureCalibratedDescriptor(SorghumLSDescriptor& descriptor, const float 
                                    const float leaf_modules_deviation, const float length_mean_scale,
                                    const float length_deviation_scale, const float leaf_width_scale,
                                    const float main_culm_diameter_m, const float tiller_leaf_count_ratio,
-                                   const float tiller_height_ratio) {
+                                   const float tiller_height_ratio, const float leaf_length_mean_scale,
+                                   const float leaf_length_deviation_scale) {
   descriptor.total_phytomer_count.mean = std::max(1.0f, leaf_modules_mean);
   descriptor.total_phytomer_count.deviation = std::max(0.0f, leaf_modules_deviation);
   ScaleLengthDistribution(descriptor.internode_length, std::max(0.0f, length_mean_scale), length_deviation_scale);
-  ScaleLengthDistribution(descriptor.leaf_blade_length, std::max(0.0f, length_mean_scale), length_deviation_scale);
-  ScaleLengthDistribution(descriptor.leaf_sheath_length, std::max(0.0f, length_mean_scale), length_deviation_scale);
-  ScaleLengthDistribution(descriptor.leaf_neck_length, std::max(0.0f, length_mean_scale), length_deviation_scale);
+  const float resolved_leaf_mean_scale =
+      leaf_length_mean_scale > 0.0f ? leaf_length_mean_scale : std::max(0.0f, length_mean_scale);
+  const float resolved_leaf_deviation_scale =
+      leaf_length_deviation_scale > 0.0f ? leaf_length_deviation_scale : length_deviation_scale;
+  ScaleLengthDistribution(descriptor.leaf_blade_length, resolved_leaf_mean_scale, resolved_leaf_deviation_scale);
+  ScaleLengthDistribution(descriptor.leaf_sheath_length, resolved_leaf_mean_scale, resolved_leaf_deviation_scale);
+  ScaleLengthDistribution(descriptor.leaf_neck_length, resolved_leaf_mean_scale, resolved_leaf_deviation_scale);
   descriptor.leaf_width_scale = std::clamp(leaf_width_scale, 0.05f, 3.0f);
   if (main_culm_diameter_m > 0.0f) {
     descriptor.internode_thickness.mean.min_value = main_culm_diameter_m;
@@ -833,7 +838,7 @@ void ConfigureCalibratedDescriptor(SorghumLSDescriptor& descriptor, const float 
     descriptor.internode_thickness.deviation.min_value = 0.0f;
     descriptor.internode_thickness.deviation.max_value = 0.0f;
   }
-  descriptor.tiller_model_version = 3u;
+  descriptor.tiller_model_version = 4u;
   descriptor.tiller_leaf_count_ratio.mean = std::clamp(tiller_leaf_count_ratio, 0.5f, 1.1f);
   descriptor.tiller_height_ratio.mean = std::clamp(tiller_height_ratio, 0.5f, 1.1f);
 }
@@ -868,7 +873,8 @@ std::shared_ptr<SorghumLSDescriptor> CreateCalibratedDescriptorTemporary(
     const std::filesystem::path& base_path, const float leaf_modules_mean, const float leaf_modules_deviation,
     const float length_mean_scale, const float length_deviation_scale, const float leaf_width_scale,
     const float main_culm_diameter_m, const float tiller_leaf_count_ratio, const float tiller_height_ratio,
-    const bool disable_tillers) {
+    const bool disable_tillers, const float leaf_length_mean_scale = 0.0f,
+    const float leaf_length_deviation_scale = 0.0f) {
   const auto source = LoadSorghumLsDescriptorAsset(base_path);
   if (!source) {
     return {};
@@ -879,7 +885,7 @@ std::shared_ptr<SorghumLSDescriptor> CreateCalibratedDescriptorTemporary(
   }
   ConfigureCalibratedDescriptor(*clone, leaf_modules_mean, leaf_modules_deviation, length_mean_scale,
                                 length_deviation_scale, leaf_width_scale, main_culm_diameter_m, tiller_leaf_count_ratio,
-                                tiller_height_ratio);
+                                tiller_height_ratio, leaf_length_mean_scale, leaf_length_deviation_scale);
   if (disable_tillers) {
     clone->tiller_count = {0.0f, 0.0f};
     clone->tiller_count_min = 0;
@@ -907,26 +913,46 @@ SorghumArchitectureStats MeasureSorghumArchitecture(const SorghumLS& sorghum) {
   struct AxisAccumulator {
     int origin_rank = 0;
     uint32_t leaf_count = 0;
+    uint32_t expanded_leaf_count = 0;
     uint32_t internode_count = 0;
+    int tip_rank = -1;
+    glm::vec3 origin_position = glm::vec3(0.0f);
+    glm::vec3 tip_position = glm::vec3(0.0f);
+    bool has_origin = false;
     float tip_height_m = 0.0f;
+    float highest_mature_collar_height_m = 0.0f;
   };
   std::map<int, AxisAccumulator> axes;
-  float root_height = 0.0f;
+  glm::vec3 root_position = glm::vec3(0.0f);
   for (const auto handle : sorghum.growth_model.graph.PeekSortedNodeList()) {
     const auto& node = sorghum.growth_model.graph.PeekNode(handle);
     if (node.data.Is<SorghumRoot>()) {
-      root_height = node.info.global_position.y;
+      root_position = node.info.global_position;
     } else if (node.data.Is<SorghumInternode>()) {
       const auto& internode = node.data.Get<SorghumInternode>();
       auto& axis = axes[internode.axis_id];
       axis.origin_rank = internode.origin_rank;
       axis.internode_count++;
-      axis.tip_height_m = std::max(axis.tip_height_m, node.info.GetGlobalEndPosition().y - root_height);
+      if (!axis.has_origin || internode.rank == 0) {
+        axis.origin_position = node.info.global_position;
+        axis.has_origin = true;
+      }
+      if (internode.rank >= axis.tip_rank) {
+        axis.tip_rank = internode.rank;
+        axis.tip_position = node.info.GetGlobalEndPosition();
+      }
+      axis.tip_height_m = std::max(axis.tip_height_m, node.info.GetGlobalEndPosition().y - root_position.y);
+      if (internode.growth_progress >= 0.95f) {
+        axis.highest_mature_collar_height_m =
+            std::max(axis.highest_mature_collar_height_m, node.info.GetGlobalEndPosition().y - root_position.y);
+      }
     } else if (node.data.Is<SorghumLeaf>()) {
       const auto& leaf = node.data.Get<SorghumLeaf>();
       auto& axis = axes[leaf.axis_id];
       axis.origin_rank = leaf.origin_rank;
       axis.leaf_count++;
+      if (leaf.alive && leaf.growth_progress >= 0.95f)
+        axis.expanded_leaf_count++;
     }
   }
   const auto main = axes.find(0);
@@ -937,8 +963,16 @@ SorghumArchitectureStats MeasureSorghumArchitecture(const SorghumLS& sorghum) {
     record.axis_id = axis_id;
     record.origin_rank = axis.origin_rank;
     record.leaf_count = axis.leaf_count;
+    record.expanded_leaf_count = axis.expanded_leaf_count;
     record.internode_count = axis.internode_count;
+    record.origin_height_m = axis.has_origin ? axis.origin_position.y - root_position.y : 0.0f;
     record.culm_tip_height_m = axis.tip_height_m;
+    if (axis.has_origin) {
+      const glm::vec3 displacement = axis.tip_position - axis.origin_position;
+      record.culm_departure_degrees = glm::degrees(
+          std::atan2(glm::length(glm::vec2(displacement.x, displacement.z)), std::max(0.0f, displacement.y)));
+    }
+    record.highest_mature_collar_height_m = axis.highest_mature_collar_height_m;
     record.leaf_ratio_to_main =
         axis_id == 0 || main_leaves == 0 ? 1.0f : static_cast<float>(axis.leaf_count) / static_cast<float>(main_leaves);
     record.height_ratio_to_main = axis_id == 0 || main_height <= 1.0e-6f ? 1.0f : axis.tip_height_m / main_height;
@@ -991,35 +1025,124 @@ bool BuildCalibrationStemContext(const SorghumGraph& graph, const LNodeHandle le
   return true;
 }
 
-float MeasureCalibrationPlantHeight(const SorghumLS& sorghum) {
-  float maximum_y = 0.0f;
+float MeasureCalibrationPlantHeight(const SorghumLS& sorghum,
+                                    std::vector<LSystemLeafPhenotypeRecord>* leaf_records = nullptr) {
+  float root_height = 0.0f;
+  for (const auto handle : sorghum.growth_model.graph.PeekSortedNodeList()) {
+    const auto& node = sorghum.growth_model.graph.PeekNode(handle);
+    if (node.data.Is<SorghumRoot>()) {
+      root_height = node.info.global_position.y;
+      break;
+    }
+  }
+  float maximum_y = root_height;
   StemContext stem_context;
   l_system_package::SorghumSpline spline;
   for (const auto handle : sorghum.growth_model.graph.PeekSortedNodeList()) {
     const auto& node = sorghum.growth_model.graph.PeekNode(handle);
     if (node.data.Is<SorghumInternode>()) {
       maximum_y = std::max({maximum_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
-    } else if (node.data.Is<SorghumLeaf>() && node.data.Get<SorghumLeaf>().alive &&
-               BuildCalibrationStemContext(sorghum.growth_model.graph, handle, stem_context)) {
-      BuildLeafSplineFromState(node.data.Get<SorghumLeaf>(), stem_context, sorghum.growth_model.sampled,
-                               sorghum.leaf_mesh_settings, spline);
+    } else if (node.data.Is<SorghumLeaf>()) {
+      const auto& leaf = node.data.Get<SorghumLeaf>();
+      LSystemLeafPhenotypeRecord record;
+      record.axis_id = leaf.axis_id;
+      record.origin_rank = leaf.origin_rank;
+      record.rank = leaf.rank;
+      record.axis_phytomer_count = leaf.axis_phytomer_count;
+      record.normalized_rank = leaf.axis_phytomer_count <= 1
+                                   ? 0.0f
+                                   : static_cast<float>(leaf.rank) / static_cast<float>(leaf.axis_phytomer_count - 1);
+      record.age_gdd = leaf.age_gdd;
+      record.growth_progress = leaf.growth_progress;
+      record.blade_length_m = leaf.blade_length;
+      record.target_blade_length_m = leaf.target_blade_length;
+      record.blade_width_m = leaf.blade_max_width;
+      record.target_blade_width_m = leaf.target_blade_max_width;
+      record.alive = leaf.alive;
+      if (!BuildCalibrationStemContext(sorghum.growth_model.graph, handle, stem_context)) {
+        if (leaf_records)
+          leaf_records->emplace_back(record);
+        continue;
+      }
+      record.collar_height_m = stem_context.segments.back().position.y - root_height;
+      if (!leaf.alive) {
+        if (leaf_records)
+          leaf_records->emplace_back(record);
+        continue;
+      }
+      BuildLeafSplineFromState(leaf, stem_context, sorghum.growth_model.sampled, sorghum.leaf_mesh_settings, spline);
+      if (leaf_records && !spline.segments.empty()) {
+        auto gravity_disabled = sorghum.growth_model.sampled;
+        gravity_disabled.leaf_gravity_droop_compliance = 0.0f;
+        l_system_package::SorghumSpline no_gravity_spline;
+        BuildLeafSplineFromState(leaf, stem_context, gravity_disabled, sorghum.leaf_mesh_settings, no_gravity_spline);
+        if (!no_gravity_spline.segments.empty())
+          record.gravity_tip_deflection_m =
+              no_gravity_spline.segments.back().position.y - spline.segments.back().position.y;
+
+        const auto blade_start = std::find_if(spline.segments.begin(), spline.segments.end(), [](const auto& segment) {
+          return segment.theta <= 90.0f;
+        });
+        if (blade_start != spline.segments.end()) {
+          const glm::vec3 base = blade_start->position;
+          const glm::vec3 lateral = glm::normalize(glm::cross(blade_start->up, blade_start->front));
+          float minimum_lateral = 0.0f;
+          float maximum_lateral = 0.0f;
+          float arc_length = 0.0f;
+          float waviness_squared = 0.0f;
+          size_t count = 0;
+          for (auto it = blade_start; it != spline.segments.end(); ++it) {
+            const float offset = glm::dot(it->position - base, lateral);
+            minimum_lateral = std::min(minimum_lateral, offset);
+            maximum_lateral = std::max(maximum_lateral, offset);
+            if (it != blade_start)
+              arc_length += glm::distance((it - 1)->position, it->position);
+            waviness_squared += 0.5f * (it->left_height_offset * it->left_height_offset +
+                                        it->right_height_offset * it->right_height_offset);
+            ++count;
+          }
+          record.centerline_lateral_span_m = maximum_lateral - minimum_lateral;
+          const float chord_length = glm::distance(base, spline.segments.back().position);
+          if (chord_length > 1.0e-6f)
+            record.centerline_arc_to_chord_ratio = arc_length / chord_length;
+          if (count > 0)
+            record.surface_waviness_rms_m = std::sqrt(waviness_squared / static_cast<float>(count));
+        }
+      }
       const int horizontal_steps = std::max(2, sorghum.leaf_mesh_settings.horizontal_subdivision_step) * 2;
+      float leaf_maximum_y = root_height;
       for (const auto& segment : spline.segments) {
         for (int i = 0; i <= horizontal_steps; ++i) {
           const float angle =
               glm::mix(-segment.theta, segment.theta, static_cast<float>(i) / static_cast<float>(horizontal_steps));
-          maximum_y = std::max(maximum_y, segment.GetLeafPoint(angle).y);
+          leaf_maximum_y = std::max(leaf_maximum_y, segment.GetLeafPoint(angle).y);
         }
       }
+      maximum_y = std::max(maximum_y, leaf_maximum_y);
+      record.maximum_height_m = leaf_maximum_y - root_height;
+      if (!spline.segments.empty()) {
+        record.tip_height_m = spline.segments.back().position.y - root_height;
+        const auto chord = spline.segments.back().position - stem_context.segments.back().position;
+        if (glm::length(chord) > 1.0e-6f)
+          record.chord_elevation_degrees = glm::degrees(std::asin(std::clamp(glm::normalize(chord).y, -1.0f, 1.0f)));
+      }
+      if (spline.segments.size() >= 2) {
+        const auto distal = spline.segments.back().position - spline.segments[spline.segments.size() - 2].position;
+        if (glm::length(distal) > 1.0e-6f)
+          record.distal_elevation_degrees = glm::degrees(std::asin(std::clamp(glm::normalize(distal).y, -1.0f, 1.0f)));
+      }
+      if (leaf_records)
+        leaf_records->emplace_back(record);
     }
   }
-  return maximum_y;
+  return std::max(0.0f, maximum_y - root_height);
 }
 
 LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<Scene>& scene, const Entity& plant,
                                                          const std::shared_ptr<SorghumLS>& sorghum,
                                                          const std::shared_ptr<SorghumLSDescriptor>& descriptor,
-                                                         const uint32_t seed) {
+                                                         const uint32_t seed, const bool finalize_snapshot,
+                                                         const bool include_organs) {
   LSystemDescriptorPhenotypeRecord record;
   record.seed = seed;
   if (!scene || !scene->IsEntityValid(plant) || !sorghum || !descriptor) {
@@ -1030,14 +1153,48 @@ LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<S
   sorghum->target_gdd = SampleTargetGddForDescriptorSeed(*descriptor, seed);
   sorghum->growth_model.Initialize(*descriptor, seed);
   sorghum->growth_model.GrowToGDD(sorghum->target_gdd, 0u);
-  sorghum->growth_model.FinalizeSnapshotMorphology();
+  if (finalize_snapshot)
+    sorghum->growth_model.FinalizeSnapshotMorphology();
 
+  float root_height = 0.0f;
   for (const auto handle : sorghum->growth_model.graph.PeekSortedNodeList()) {
     const auto& node = sorghum->growth_model.graph.PeekNode(handle);
-    if (node.data.Is<SorghumLeaf>()) {
+    if (node.data.Is<SorghumRoot>()) {
+      root_height = node.info.global_position.y;
+    } else if (node.data.Is<SorghumLeaf>()) {
+      const auto& leaf = node.data.Get<SorghumLeaf>();
       ++record.leaf_count;
-      if (node.data.Get<SorghumLeaf>().alive)
+      if (leaf.alive) {
         ++record.live_leaf_count;
+        if (leaf.axis_id == 0) {
+          record.main_culm_max_blade_length_m = std::max(record.main_culm_max_blade_length_m, leaf.blade_length);
+          record.main_culm_max_target_blade_length_m =
+              std::max(record.main_culm_max_target_blade_length_m, leaf.target_blade_length);
+          record.main_culm_max_blade_width_m = std::max(record.main_culm_max_blade_width_m, leaf.blade_max_width);
+          record.main_culm_max_target_blade_width_m =
+              std::max(record.main_culm_max_target_blade_width_m, leaf.target_blade_max_width);
+        }
+      }
+    } else if (include_organs && node.data.Is<SorghumInternode>()) {
+      const auto& internode = node.data.Get<SorghumInternode>();
+      LSystemInternodePhenotypeRecord internode_record;
+      internode_record.axis_id = internode.axis_id;
+      internode_record.origin_rank = internode.origin_rank;
+      internode_record.rank = internode.rank;
+      internode_record.axis_phytomer_count = internode.axis_phytomer_count;
+      internode_record.normalized_rank =
+          internode.axis_phytomer_count <= 1
+              ? 0.0f
+              : static_cast<float>(internode.rank) / static_cast<float>(internode.axis_phytomer_count - 1);
+      internode_record.age_gdd = internode.age_gdd;
+      internode_record.growth_progress = internode.growth_progress;
+      internode_record.length_m = internode.length;
+      internode_record.target_length_m = internode.target_length;
+      internode_record.diameter_m = internode.thickness;
+      internode_record.target_diameter_m = internode.target_thickness;
+      internode_record.base_height_m = node.info.global_position.y - root_height;
+      internode_record.tip_height_m = node.info.GetGlobalEndPosition().y - root_height;
+      record.internodes.emplace_back(internode_record);
     }
   }
   const auto architecture = MeasureSorghumArchitecture(*sorghum);
@@ -1045,9 +1202,51 @@ LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<S
   record.tiller_leaf_count = architecture.tiller_leaf_count;
   record.primary_tiller_count = architecture.primary_tiller_count;
   record.axes = architecture.axes;
-  record.height_m = MeasureCalibrationPlantHeight(*sorghum);
+  for (const auto& axis : record.axes) {
+    if (axis.axis_id == 0) {
+      record.main_culm_expanded_leaf_count = axis.expanded_leaf_count;
+    } else {
+      record.tiller_expanded_leaf_count += axis.expanded_leaf_count;
+    }
+  }
+  record.height_m = MeasureCalibrationPlantHeight(*sorghum, include_organs ? &record.leaves : nullptr);
+  const auto main_axis = std::find_if(record.axes.begin(), record.axes.end(), [](const auto& axis) {
+    return axis.axis_id == 0;
+  });
+  if (main_axis != record.axes.end()) {
+    record.main_culm_tip_height_m = main_axis->culm_tip_height_m;
+    record.main_culm_highest_mature_collar_height_m = main_axis->highest_mature_collar_height_m;
+    if (record.height_m > 1.0e-6f) {
+      record.main_culm_tip_height_ratio = record.main_culm_tip_height_m / record.height_m;
+      record.main_culm_mature_collar_height_ratio = record.main_culm_highest_mature_collar_height_m / record.height_m;
+    }
+  }
   record.has_geometry = true;
   return record;
+}
+
+std::vector<LSystemDescriptorPhenotypeRecord> SampleDescriptorPhenotypes(
+    const std::shared_ptr<Scene>& scene, const std::shared_ptr<SorghumLSDescriptor>& descriptor, const int sample_count,
+    const int seed_base, const bool finalize_snapshot, const bool include_organs) {
+  std::vector<LSystemDescriptorPhenotypeRecord> records;
+  if (!scene || !descriptor)
+    return records;
+  const int clamped_sample_count = std::max(0, sample_count);
+  records.reserve(static_cast<size_t>(clamped_sample_count));
+  const Entity sample_entity = scene->CreateEntity("__DescriptorCalibrationSample");
+  const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(sample_entity).lock();
+  if (!sorghum) {
+    scene->DeleteEntity(sample_entity);
+    return records;
+  }
+  for (int i = 0; i < clamped_sample_count; ++i) {
+    const uint32_t seed = static_cast<uint32_t>(std::max(0, seed_base)) + static_cast<uint32_t>(i);
+    records.emplace_back(
+        MeasureDescriptorSample(scene, sample_entity, sorghum, descriptor, seed, finalize_snapshot, include_organs));
+  }
+  scene->DeleteEntity(sample_entity);
+  TransformGraph::CalculateTransformGraphs(scene);
+  return records;
 }
 
 }  // namespace
@@ -1156,6 +1355,7 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("pawaga_descriptor_path"), py::arg("regenerate_geometry") = true, py::arg("seed_base") = -1);
   m.def("SetSorghumLsGridSpacing", &SetSorghumLsGridSpacing, py::arg("spacing_x"), py::arg("spacing_z"),
         py::arg("cultivar_filter") = "");
+  m.def("ConformSorghumLsPlantsToGroundMesh", &ConformSorghumLsPlantsToGroundMesh);
   m.def("RemoveSorghumLsPseudoTillerPlants", &RemoveSorghumLsPseudoTillerPlants);
   m.def("ConvertSorghumLsPlantsToPlantingMarkers", &ConvertSorghumLsPlantsToPlantingMarkers);
   m.def("InstantiateSorghumLsPlantsFromPlantingMarkers", &InstantiateSorghumLsPlantsFromPlantingMarkers);
@@ -1174,12 +1374,23 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("leaf_modules_mean"), py::arg("leaf_modules_deviation"), py::arg("length_mean_scale"),
         py::arg("length_deviation_scale"), py::arg("sample_count") = 1000, py::arg("seed_base") = 0,
         py::arg("leaf_width_scale") = 1.0f, py::arg("main_culm_diameter_m") = 0.0f,
-        py::arg("tiller_leaf_count_ratio") = 0.90f, py::arg("tiller_height_ratio") = 0.90f);
+        py::arg("tiller_leaf_count_ratio") = 0.90f, py::arg("tiller_height_ratio") = 0.90f,
+        py::arg("finalize_snapshot") = true, py::arg("include_organs") = false,
+        py::arg("leaf_length_mean_scale") = 0.0f, py::arg("leaf_length_deviation_scale") = 0.0f,
+        py::arg("leaf_gravity_droop_compliance") = -1.0f, py::arg("target_gdd") = -1.0f);
+  m.def("SampleSorghumLsDescriptorAssetPhenotypes", &SampleSorghumLsDescriptorAssetPhenotypes,
+        py::arg("descriptor_path"), py::arg("sample_count") = 1000, py::arg("seed_base") = 0,
+        py::arg("finalize_snapshot") = true, py::arg("include_organs") = false,
+        py::arg("leaf_gravity_droop_compliance") = -1.0f);
   m.def("SaveCalibratedSorghumLsDescriptor", &SaveCalibratedSorghumLsDescriptor, py::arg("base_descriptor_path"),
         py::arg("output_descriptor_path"), py::arg("leaf_modules_mean"), py::arg("leaf_modules_deviation"),
         py::arg("length_mean_scale"), py::arg("length_deviation_scale"), py::arg("leaf_width_scale") = 1.0f,
         py::arg("main_culm_diameter_m") = 0.0f, py::arg("tiller_leaf_count_ratio") = 0.90f,
-        py::arg("tiller_height_ratio") = 0.90f);
+        py::arg("tiller_height_ratio") = 0.90f, py::arg("leaf_length_mean_scale") = 0.0f,
+        py::arg("leaf_length_deviation_scale") = 0.0f, py::arg("target_gdd") = -1.0f);
+  m.def("ScaleSorghumLsDescriptorOrganLengths", &ScaleSorghumLsDescriptorOrganLengths, py::arg("descriptor_path"),
+        py::arg("internode_mean_scale"), py::arg("internode_deviation_scale"), py::arg("leaf_mean_scale") = 1.0f,
+        py::arg("leaf_deviation_scale") = 1.0f, py::arg("leaf_gravity_droop_compliance") = -1.0f);
   m.def("SaveActiveSceneAsProjectAsset", &SaveActiveSceneAsProjectAsset, py::arg("scene_asset_path"));
   m.def("CreateEntityFromPrefab", &CreateEntityFromPrefab);
 
@@ -1229,27 +1440,85 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("axis_id", &LSystemAxisPhenotypeRecord::axis_id)
       .def_readonly("origin_rank", &LSystemAxisPhenotypeRecord::origin_rank)
       .def_readonly("leaf_count", &LSystemAxisPhenotypeRecord::leaf_count)
+      .def_readonly("expanded_leaf_count", &LSystemAxisPhenotypeRecord::expanded_leaf_count)
       .def_readonly("internode_count", &LSystemAxisPhenotypeRecord::internode_count)
+      .def_readonly("origin_height_m", &LSystemAxisPhenotypeRecord::origin_height_m)
       .def_readonly("culm_tip_height_m", &LSystemAxisPhenotypeRecord::culm_tip_height_m)
+      .def_readonly("culm_departure_degrees", &LSystemAxisPhenotypeRecord::culm_departure_degrees)
+      .def_readonly("highest_mature_collar_height_m", &LSystemAxisPhenotypeRecord::highest_mature_collar_height_m)
       .def_readonly("leaf_ratio_to_main", &LSystemAxisPhenotypeRecord::leaf_ratio_to_main)
       .def_readonly("height_ratio_to_main", &LSystemAxisPhenotypeRecord::height_ratio_to_main);
+
+  py::class_<LSystemLeafPhenotypeRecord>(m, "LSystemLeafPhenotypeRecord")
+      .def_readonly("axis_id", &LSystemLeafPhenotypeRecord::axis_id)
+      .def_readonly("origin_rank", &LSystemLeafPhenotypeRecord::origin_rank)
+      .def_readonly("rank", &LSystemLeafPhenotypeRecord::rank)
+      .def_readonly("axis_phytomer_count", &LSystemLeafPhenotypeRecord::axis_phytomer_count)
+      .def_readonly("normalized_rank", &LSystemLeafPhenotypeRecord::normalized_rank)
+      .def_readonly("age_gdd", &LSystemLeafPhenotypeRecord::age_gdd)
+      .def_readonly("growth_progress", &LSystemLeafPhenotypeRecord::growth_progress)
+      .def_readonly("blade_length_m", &LSystemLeafPhenotypeRecord::blade_length_m)
+      .def_readonly("target_blade_length_m", &LSystemLeafPhenotypeRecord::target_blade_length_m)
+      .def_readonly("blade_width_m", &LSystemLeafPhenotypeRecord::blade_width_m)
+      .def_readonly("target_blade_width_m", &LSystemLeafPhenotypeRecord::target_blade_width_m)
+      .def_readonly("collar_height_m", &LSystemLeafPhenotypeRecord::collar_height_m)
+      .def_readonly("tip_height_m", &LSystemLeafPhenotypeRecord::tip_height_m)
+      .def_readonly("maximum_height_m", &LSystemLeafPhenotypeRecord::maximum_height_m)
+      .def_readonly("chord_elevation_degrees", &LSystemLeafPhenotypeRecord::chord_elevation_degrees)
+      .def_readonly("distal_elevation_degrees", &LSystemLeafPhenotypeRecord::distal_elevation_degrees)
+      .def_readonly("gravity_tip_deflection_m", &LSystemLeafPhenotypeRecord::gravity_tip_deflection_m)
+      .def_readonly("centerline_lateral_span_m", &LSystemLeafPhenotypeRecord::centerline_lateral_span_m)
+      .def_readonly("centerline_arc_to_chord_ratio", &LSystemLeafPhenotypeRecord::centerline_arc_to_chord_ratio)
+      .def_readonly("surface_waviness_rms_m", &LSystemLeafPhenotypeRecord::surface_waviness_rms_m)
+      .def_readonly("alive", &LSystemLeafPhenotypeRecord::alive);
+
+  py::class_<LSystemInternodePhenotypeRecord>(m, "LSystemInternodePhenotypeRecord")
+      .def_readonly("axis_id", &LSystemInternodePhenotypeRecord::axis_id)
+      .def_readonly("origin_rank", &LSystemInternodePhenotypeRecord::origin_rank)
+      .def_readonly("rank", &LSystemInternodePhenotypeRecord::rank)
+      .def_readonly("axis_phytomer_count", &LSystemInternodePhenotypeRecord::axis_phytomer_count)
+      .def_readonly("normalized_rank", &LSystemInternodePhenotypeRecord::normalized_rank)
+      .def_readonly("age_gdd", &LSystemInternodePhenotypeRecord::age_gdd)
+      .def_readonly("growth_progress", &LSystemInternodePhenotypeRecord::growth_progress)
+      .def_readonly("length_m", &LSystemInternodePhenotypeRecord::length_m)
+      .def_readonly("target_length_m", &LSystemInternodePhenotypeRecord::target_length_m)
+      .def_readonly("diameter_m", &LSystemInternodePhenotypeRecord::diameter_m)
+      .def_readonly("target_diameter_m", &LSystemInternodePhenotypeRecord::target_diameter_m)
+      .def_readonly("base_height_m", &LSystemInternodePhenotypeRecord::base_height_m)
+      .def_readonly("tip_height_m", &LSystemInternodePhenotypeRecord::tip_height_m);
 
   py::class_<LSystemDescriptorPhenotypeRecord>(m, "LSystemDescriptorPhenotypeRecord")
       .def_readonly("seed", &LSystemDescriptorPhenotypeRecord::seed)
       .def_readonly("leaf_count", &LSystemDescriptorPhenotypeRecord::leaf_count)
       .def_readonly("live_leaf_count", &LSystemDescriptorPhenotypeRecord::live_leaf_count)
       .def_readonly("main_culm_leaf_count", &LSystemDescriptorPhenotypeRecord::main_culm_leaf_count)
+      .def_readonly("main_culm_expanded_leaf_count", &LSystemDescriptorPhenotypeRecord::main_culm_expanded_leaf_count)
       .def_readonly("tiller_leaf_count", &LSystemDescriptorPhenotypeRecord::tiller_leaf_count)
+      .def_readonly("tiller_expanded_leaf_count", &LSystemDescriptorPhenotypeRecord::tiller_expanded_leaf_count)
       .def_readonly("primary_tiller_count", &LSystemDescriptorPhenotypeRecord::primary_tiller_count)
       .def_readonly("triangle_count", &LSystemDescriptorPhenotypeRecord::triangle_count)
       .def_readonly("leaf_triangle_count", &LSystemDescriptorPhenotypeRecord::leaf_triangle_count)
       .def_readonly("stem_triangle_count", &LSystemDescriptorPhenotypeRecord::stem_triangle_count)
       .def_readonly("height_m", &LSystemDescriptorPhenotypeRecord::height_m)
+      .def_readonly("main_culm_tip_height_m", &LSystemDescriptorPhenotypeRecord::main_culm_tip_height_m)
+      .def_readonly("main_culm_highest_mature_collar_height_m",
+                    &LSystemDescriptorPhenotypeRecord::main_culm_highest_mature_collar_height_m)
+      .def_readonly("main_culm_tip_height_ratio", &LSystemDescriptorPhenotypeRecord::main_culm_tip_height_ratio)
+      .def_readonly("main_culm_mature_collar_height_ratio",
+                    &LSystemDescriptorPhenotypeRecord::main_culm_mature_collar_height_ratio)
+      .def_readonly("main_culm_max_blade_length_m", &LSystemDescriptorPhenotypeRecord::main_culm_max_blade_length_m)
+      .def_readonly("main_culm_max_target_blade_length_m",
+                    &LSystemDescriptorPhenotypeRecord::main_culm_max_target_blade_length_m)
+      .def_readonly("main_culm_max_blade_width_m", &LSystemDescriptorPhenotypeRecord::main_culm_max_blade_width_m)
+      .def_readonly("main_culm_max_target_blade_width_m",
+                    &LSystemDescriptorPhenotypeRecord::main_culm_max_target_blade_width_m)
       .def_readonly("area", &LSystemDescriptorPhenotypeRecord::area)
       .def_readonly("leaf_area", &LSystemDescriptorPhenotypeRecord::leaf_area)
       .def_readonly("stem_area", &LSystemDescriptorPhenotypeRecord::stem_area)
       .def_readonly("has_geometry", &LSystemDescriptorPhenotypeRecord::has_geometry)
-      .def_readonly("axes", &LSystemDescriptorPhenotypeRecord::axes);
+      .def_readonly("axes", &LSystemDescriptorPhenotypeRecord::axes)
+      .def_readonly("leaves", &LSystemDescriptorPhenotypeRecord::leaves)
+      .def_readonly("internodes", &LSystemDescriptorPhenotypeRecord::internodes);
 
   py::class_<LSystemPlantSceneMetadataRecord>(m, "LSystemPlantSceneMetadataRecord")
       .def_readonly("name", &LSystemPlantSceneMetadataRecord::name)
@@ -1262,6 +1531,12 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("main_culm_leaf_count", &LSystemPlantSceneMetadataRecord::main_culm_leaf_count)
       .def_readonly("tiller_leaf_count", &LSystemPlantSceneMetadataRecord::tiller_leaf_count)
       .def_readonly("primary_tiller_count", &LSystemPlantSceneMetadataRecord::primary_tiller_count)
+      .def_readonly("last_grow_seconds", &LSystemPlantSceneMetadataRecord::last_grow_seconds)
+      .def_readonly("last_rebuild_seconds", &LSystemPlantSceneMetadataRecord::last_rebuild_seconds)
+      .def_readonly("last_rebuild_internode_seconds", &LSystemPlantSceneMetadataRecord::last_rebuild_internode_seconds)
+      .def_readonly("last_leaf_spline_seconds", &LSystemPlantSceneMetadataRecord::last_leaf_spline_seconds)
+      .def_readonly("last_leaf_mesh_seconds", &LSystemPlantSceneMetadataRecord::last_leaf_mesh_seconds)
+      .def_readonly("last_mesh_upload_seconds", &LSystemPlantSceneMetadataRecord::last_mesh_upload_seconds)
       .def_readonly("leaf_width_scale", &LSystemPlantSceneMetadataRecord::leaf_width_scale)
       .def_readonly("leaf_thickness_m", &LSystemPlantSceneMetadataRecord::leaf_thickness_m)
       .def_readonly("plant_height_m", &LSystemPlantSceneMetadataRecord::plant_height_m)
@@ -2029,6 +2304,109 @@ size_t PyDigitalAgriculture::SetSorghumLsGridSpacing(const float spacing_x, cons
   return targets.size();
 }
 
+size_t PyDigitalAgriculture::ConformSorghumLsPlantsToGroundMesh() {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: no active scene")
+    return 0;
+  }
+  const Entity ground = FindEntityByName(scene, "Ground Mesh");
+  if (!scene->IsEntityValid(ground)) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: Ground Mesh entity not found")
+    return 0;
+  }
+  const auto renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(ground).lock();
+  const auto mesh = renderer ? renderer->mesh.Get<Mesh>() : nullptr;
+  if (!mesh) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: ground mesh asset unavailable")
+    return 0;
+  }
+  const auto& vertices = mesh->PeekVertices();
+  if (vertices.empty()) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: ground mesh has no vertices")
+    return 0;
+  }
+  glm::vec2 minimum(std::numeric_limits<float>::max());
+  glm::vec2 maximum(std::numeric_limits<float>::lowest());
+  for (const auto& vertex : vertices) {
+    const glm::vec2 position(vertex.position.x, vertex.position.z);
+    minimum = glm::min(minimum, position);
+    maximum = glm::max(maximum, position);
+  }
+  const glm::vec2 extent = maximum - minimum;
+  const float cell_size =
+      std::max(std::max(extent.x, extent.y) / std::sqrt(static_cast<float>(vertices.size())) * 1.5f, 0.005f);
+  const size_t columns = static_cast<size_t>(std::ceil(extent.x / cell_size)) + 1;
+  const size_t rows = static_cast<size_t>(std::ceil(extent.y / cell_size)) + 1;
+  if (!columns || !rows || columns > std::numeric_limits<size_t>::max() / rows) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: invalid ground sampling extent")
+    return 0;
+  }
+  std::vector<glm::vec4> samples(columns * rows, glm::vec4(0.0f, 0.0f, 0.0f, std::numeric_limits<float>::max()));
+  for (const auto& vertex : vertices) {
+    const glm::vec2 position(vertex.position.x, vertex.position.z);
+    const size_t column = std::min(static_cast<size_t>((position.x - minimum.x) / cell_size), columns - 1);
+    const size_t row = std::min(static_cast<size_t>((position.y - minimum.y) / cell_size), rows - 1);
+    const glm::vec2 center = minimum + glm::vec2(column + 0.5f, row + 0.5f) * cell_size;
+    const glm::vec2 offset = position - center;
+    const float distance = glm::dot(offset, offset);
+    auto& sample = samples[row * columns + column];
+    if (distance < sample.w)
+      sample = glm::vec4(vertex.position, distance);
+  }
+
+  const auto ground_transform = scene->GetDataComponent<GlobalTransform>(ground);
+  const glm::mat4 inverse_ground = glm::inverse(ground_transform.value);
+  const auto sample_height = [&](const glm::vec3& world_position) {
+    const glm::vec3 local = glm::vec3(inverse_ground * glm::vec4(world_position, 1.0f));
+    const int column =
+        std::clamp(static_cast<int>((local.x - minimum.x) / cell_size), 0, static_cast<int>(columns - 1));
+    const int row = std::clamp(static_cast<int>((local.z - minimum.y) / cell_size), 0, static_cast<int>(rows - 1));
+    glm::vec3 nearest(local.x, 0.0f, local.z);
+    float nearest_distance = std::numeric_limits<float>::max();
+    for (int dz = -2; dz <= 2; ++dz) {
+      for (int dx = -2; dx <= 2; ++dx) {
+        const int candidate_column = column + dx;
+        const int candidate_row = row + dz;
+        if (candidate_column < 0 || candidate_row < 0 || candidate_column >= static_cast<int>(columns) ||
+            candidate_row >= static_cast<int>(rows))
+          continue;
+        const glm::vec4& candidate = samples[candidate_row * columns + candidate_column];
+        if (candidate.w == std::numeric_limits<float>::max())
+          continue;
+        const glm::vec2 offset(candidate.x - local.x, candidate.z - local.z);
+        const float distance = glm::dot(offset, offset);
+        if (distance < nearest_distance) {
+          nearest = glm::vec3(candidate);
+          nearest_distance = distance;
+        }
+      }
+    }
+    return ground_transform.TransformPoint(nearest).y;
+  };
+
+  const auto* plants = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>();
+  if (!plants) {
+    EVOENGINE_WARNING("ConformSorghumLsPlantsToGroundMesh: no SorghumLS component owners")
+    return 0;
+  }
+  size_t count = 0;
+  for (const auto plant : *plants) {
+    if (!scene->IsEntityValid(plant) || scene->GetEntityName(plant).find("_cluster_") != std::string::npos)
+      continue;
+    const float root_y = scene->GetDataComponent<GlobalTransform>(plant).GetPosition().y;
+    auto transform = scene->GetDataComponent<Transform>(plant);
+    transform.SetPosition(
+        transform.GetPosition() +
+        glm::vec3(0.0f, sample_height(scene->GetDataComponent<GlobalTransform>(plant).GetPosition()) - root_y, 0.0f));
+    scene->SetDataComponent(plant, transform);
+    ++count;
+  }
+  if (count)
+    TransformGraph::CalculateTransformGraphs(scene);
+  return count;
+}
+
 size_t PyDigitalAgriculture::RemoveSorghumLsPseudoTillerPlants() {
   const auto scene = ApplicationContext::Get().GetActiveScene();
   if (!scene) {
@@ -2132,6 +2510,12 @@ std::vector<LSystemPlantSceneMetadataRecord> PyDigitalAgriculture::GetSorghumLsP
     record.global_position = scene->GetDataComponent<GlobalTransform>(plant).GetPosition();
     if (const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(plant).lock()) {
       record.leaf_count = sorghum->last_leaf_count;
+      record.last_grow_seconds = sorghum->last_grow_seconds;
+      record.last_rebuild_seconds = sorghum->last_rebuild_seconds;
+      record.last_rebuild_internode_seconds = sorghum->last_rebuild_internode_seconds;
+      record.last_leaf_spline_seconds = sorghum->last_leaf_spline_seconds;
+      record.last_leaf_mesh_seconds = sorghum->last_leaf_mesh_seconds;
+      record.last_mesh_upload_seconds = sorghum->last_mesh_upload_seconds;
       const auto architecture = MeasureSorghumArchitecture(*sorghum);
       record.main_culm_leaf_count = architecture.main_culm_leaf_count;
       record.tiller_leaf_count = architecture.tiller_leaf_count;
@@ -2449,56 +2833,79 @@ std::vector<LSystemDescriptorPhenotypeRecord> PyDigitalAgriculture::SampleSorghu
     const std::filesystem::path& base_descriptor_path, const float leaf_modules_mean,
     const float leaf_modules_deviation, const float length_mean_scale, const float length_deviation_scale,
     const int sample_count, const int seed_base, const float leaf_width_scale, const float main_culm_diameter_m,
-    const float tiller_leaf_count_ratio, const float tiller_height_ratio) {
-  std::vector<LSystemDescriptorPhenotypeRecord> records;
+    const float tiller_leaf_count_ratio, const float tiller_height_ratio, const bool finalize_snapshot,
+    const bool include_organs, const float leaf_length_mean_scale, const float leaf_length_deviation_scale,
+    const float leaf_gravity_droop_compliance, const float target_gdd) {
   const auto scene = ApplicationContext::Get().GetActiveScene();
   if (!scene) {
     EVOENGINE_ERROR("SampleSorghumLsDescriptorPhenotypes failed: no active scene")
-    return records;
+    return {};
   }
   const auto descriptor = CreateCalibratedDescriptorTemporary(
       base_descriptor_path, leaf_modules_mean, leaf_modules_deviation, length_mean_scale, length_deviation_scale,
-      leaf_width_scale, main_culm_diameter_m, tiller_leaf_count_ratio, tiller_height_ratio, false);
+      leaf_width_scale, main_culm_diameter_m, tiller_leaf_count_ratio, tiller_height_ratio, false,
+      leaf_length_mean_scale, leaf_length_deviation_scale);
   if (!descriptor) {
     EVOENGINE_ERROR("SampleSorghumLsDescriptorPhenotypes failed: could not load descriptor " +
                     WithExtension(base_descriptor_path, ".sorghumls").string())
-    return records;
+    return {};
   }
+  if (leaf_gravity_droop_compliance >= 0.0f) {
+    descriptor->leaf_gravity_droop_compliance.mean = leaf_gravity_droop_compliance;
+    descriptor->leaf_gravity_droop_compliance.deviation = 0.0f;
+  }
+  if (target_gdd >= 0.0f) {
+    descriptor->target_gdd.mean = target_gdd;
+    descriptor->target_gdd.deviation = 0.0f;
+  }
+  return SampleDescriptorPhenotypes(scene, descriptor, sample_count, seed_base, finalize_snapshot, include_organs);
+}
 
-  const int clamped_sample_count = std::max(0, sample_count);
-  records.reserve(static_cast<size_t>(clamped_sample_count));
-  const Entity sample_entity = scene->CreateEntity("__DescriptorCalibrationSample");
-  const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(sample_entity).lock();
-  if (!sorghum) {
-    scene->DeleteEntity(sample_entity);
-    EVOENGINE_ERROR("SampleSorghumLsDescriptorPhenotypes failed: could not create sample plant")
-    return records;
+std::vector<LSystemDescriptorPhenotypeRecord> PyDigitalAgriculture::SampleSorghumLsDescriptorAssetPhenotypes(
+    const std::filesystem::path& descriptor_path, const int sample_count, const int seed_base,
+    const bool finalize_snapshot, const bool include_organs, const float leaf_gravity_droop_compliance) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    EVOENGINE_ERROR("SampleSorghumLsDescriptorAssetPhenotypes failed: no active scene")
+    return {};
   }
-  for (int i = 0; i < clamped_sample_count; ++i) {
-    const uint32_t seed = static_cast<uint32_t>(std::max(0, seed_base)) + static_cast<uint32_t>(i);
-    records.emplace_back(MeasureDescriptorSample(scene, sample_entity, sorghum, descriptor, seed));
+  const auto source = LoadSorghumLsDescriptorAsset(descriptor_path);
+  if (!source) {
+    EVOENGINE_ERROR("SampleSorghumLsDescriptorAssetPhenotypes failed: could not load descriptor " +
+                    WithExtension(descriptor_path, ".sorghumls").string())
+    return {};
   }
-  scene->DeleteEntity(sample_entity);
-  TransformGraph::CalculateTransformGraphs(scene);
-  return records;
+  auto descriptor = leaf_gravity_droop_compliance >= 0.0f ? CloneDescriptorTemporary(*source) : source;
+  if (leaf_gravity_droop_compliance >= 0.0f) {
+    descriptor->leaf_gravity_droop_compliance.mean = leaf_gravity_droop_compliance;
+    descriptor->leaf_gravity_droop_compliance.deviation = 0.0f;
+  }
+  return SampleDescriptorPhenotypes(scene, descriptor, sample_count, seed_base, finalize_snapshot, include_organs);
 }
 
 bool PyDigitalAgriculture::SaveCalibratedSorghumLsDescriptor(
     const std::filesystem::path& base_descriptor_path, const std::filesystem::path& output_descriptor_path,
     const float leaf_modules_mean, const float leaf_modules_deviation, const float length_mean_scale,
     const float length_deviation_scale, const float leaf_width_scale, const float main_culm_diameter_m,
-    const float tiller_leaf_count_ratio, const float tiller_height_ratio) {
+    const float tiller_leaf_count_ratio, const float tiller_height_ratio, const float leaf_length_mean_scale,
+    const float leaf_length_deviation_scale, const float target_gdd) {
   if (!IsProjectAssetPath(output_descriptor_path)) {
     EVOENGINE_ERROR("SaveCalibratedSorghumLsDescriptor failed: output path must be relative to project assets")
     return false;
   }
   const auto descriptor = CreateCalibratedDescriptorTemporary(
       base_descriptor_path, leaf_modules_mean, leaf_modules_deviation, length_mean_scale, length_deviation_scale,
-      leaf_width_scale, main_culm_diameter_m, tiller_leaf_count_ratio, tiller_height_ratio, false);
+      leaf_width_scale, main_culm_diameter_m, tiller_leaf_count_ratio, tiller_height_ratio, false,
+      leaf_length_mean_scale, leaf_length_deviation_scale);
   if (!descriptor) {
     EVOENGINE_ERROR("SaveCalibratedSorghumLsDescriptor failed: could not load descriptor " +
                     WithExtension(base_descriptor_path, ".sorghumls").string())
     return false;
+  }
+  descriptor->finalize_snapshot_morphology = true;
+  if (target_gdd >= 0.0f) {
+    descriptor->target_gdd.mean = target_gdd;
+    descriptor->target_gdd.deviation = 0.0f;
   }
   if (!SaveDescriptorAsset(descriptor, output_descriptor_path)) {
     EVOENGINE_ERROR("SaveCalibratedSorghumLsDescriptor failed: could not save " +
@@ -2506,6 +2913,31 @@ bool PyDigitalAgriculture::SaveCalibratedSorghumLsDescriptor(
     return false;
   }
   return true;
+}
+
+bool PyDigitalAgriculture::ScaleSorghumLsDescriptorOrganLengths(const std::filesystem::path& descriptor_path,
+                                                                const float internode_mean_scale,
+                                                                const float internode_deviation_scale,
+                                                                const float leaf_mean_scale,
+                                                                const float leaf_deviation_scale,
+                                                                const float leaf_gravity_droop_compliance) {
+  const auto descriptor = LoadSorghumLsDescriptorAsset(descriptor_path);
+  if (!descriptor) {
+    EVOENGINE_ERROR("ScaleSorghumLsDescriptorOrganLengths failed: could not load descriptor " +
+                    WithExtension(descriptor_path, ".sorghumls").string())
+    return false;
+  }
+  ScaleLengthDistribution(descriptor->internode_length, std::max(0.0f, internode_mean_scale),
+                          internode_deviation_scale);
+  for (auto* distribution :
+       {&descriptor->leaf_blade_length, &descriptor->leaf_sheath_length, &descriptor->leaf_neck_length}) {
+    ScaleLengthDistribution(*distribution, std::max(0.0f, leaf_mean_scale), leaf_deviation_scale);
+  }
+  if (leaf_gravity_droop_compliance >= 0.0f) {
+    descriptor->leaf_gravity_droop_compliance.mean = leaf_gravity_droop_compliance;
+    descriptor->leaf_gravity_droop_compliance.deviation = 0.0f;
+  }
+  return descriptor->Save();
 }
 
 Entity PyDigitalAgriculture::CreateEntityFromPrefab(const Handle& prefab_handle, const glm::vec3& position,

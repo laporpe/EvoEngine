@@ -241,7 +241,6 @@ void SorghumGrowthModel::FinalizeSnapshotMorphology() {
       leaf.blade_end_width_ratio = leaf.target_blade_end_width_ratio;
       leaf.insertion_angle_deg = leaf.target_insertion_angle_deg;
       leaf.curling = leaf.target_curling;
-      leaf.bending = leaf.target_bending;
       leaf.waviness = leaf.target_waviness;
       leaf.growth_progress = 1.0f;
     }

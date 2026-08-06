@@ -41,12 +41,13 @@ struct SorghumRoot {
 };
 
 struct SorghumApex {
-  int order = 0;                   ///< 0 = main culm, 1 = tiller.
-  int vigor = 0;                   ///< Remaining phytomer emission budget.
-  int phytomer_count = 0;          ///< Phytomers emitted so far on this axis.
-  float phyllotaxis_phase = 0.0f;  ///< Azimuth carried across phytomers (deg).
-  float node_random = 0.5f;        ///< Per-node random scalar in [0,1].
-  float age_gdd = 0.0f;            ///< GDD accumulated since last emission.
+  int order = 0;                      ///< 0 = main culm, 1 = tiller.
+  int vigor = 0;                      ///< Remaining phytomer emission budget.
+  int phytomer_count = 0;             ///< Phytomers emitted so far on this axis.
+  float phyllotaxis_phase = 0.0f;     ///< Azimuth carried across phytomers (deg).
+  float axis_base_roll_angle = 0.0f;  ///< One-time basal axis departure azimuth (deg).
+  float node_random = 0.5f;           ///< Per-node random scalar in [0,1].
+  float age_gdd = 0.0f;               ///< GDD accumulated since last emission.
 
   /// Per-apex stamped sample of the descriptor's `plastochron_gdd`. Stamped
   /// once at apex creation so the R-Apex-Phytomer condition predicate and
@@ -145,6 +146,9 @@ struct SorghumLeaf {
   float waviness = 0.0f;
   float target_waviness = 0.0f;               ///< amplitude
   float waviness_frequency = 0.0f;            ///< constant; not interpolated
+  float axial_twist_amplitude_deg = 0.0f;     ///< Stable per-leaf local-frame roll amplitude.
+  float axial_twist_frequency_ratio = 0.0f;   ///< Cycles relative to blade-edge waviness.
+  float axial_twist_phase_rad = 0.0f;         ///< Stable per-leaf phase.
   float growth_progress = 0.0f;               ///< 0..1; mirrors PineInternode::growth_progress
   ContinuousGrowthState continuous_growth{};  ///< thermal maturation state (parity with PineNeedleCluster)
 
@@ -157,6 +161,7 @@ struct SorghumLeaf {
   float lifespan_years = 2.5f;    ///< Sampled at initiation (~2-3y typical).
   float wilting_years = 0.5f;     ///< Senescence-onset -> fully-wilted window.
   float senescence_phase = 0.0f;  ///< 0 = green, 1 = fully wilted.
+  float damage_severity = 0.0f;   ///< Maximum deterministic edge weathering at maturity.
   bool alive = true;              ///< False = abscised; mesher skips.
 };
 

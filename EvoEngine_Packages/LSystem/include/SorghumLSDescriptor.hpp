@@ -33,6 +33,7 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   evo_engine::SingleDistribution<float> total_phytomer_count{14.0f};
   evo_engine::SingleDistribution<float> phyllotaxis_angle{180.0f};  ///< distichous
   evo_engine::SingleDistribution<float> branch_azimuth_offset{0.0f};
+  evo_engine::SingleDistribution<float> main_culm_lean_angle{0.0f};
 
   // ===== Internode morphology (rank-indexed) =====
   evo_engine::PlottedDistribution<float> internode_length;
@@ -55,7 +56,19 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   evo_engine::PlottedDistribution<float> leaf_bending;
   evo_engine::PlottedDistribution<float> leaf_waviness;
   evo_engine::SingleDistribution<float> leaf_waviness_frequency{8.0f};
+  evo_engine::PlottedDistribution<float> leaf_waviness_width_fraction;
+  evo_engine::SingleDistribution<float> leaf_waviness_wavelength_m{0.0f};
+  evo_engine::SingleDistribution<float> leaf_centerline_waviness_fraction{0.0f};
+  evo_engine::SingleDistribution<float> leaf_static_wind_deflection_fraction{0.0f};
+  evo_engine::SingleDistribution<float> leaf_axial_twist_max_degrees{0.0f};
+  evo_engine::SingleDistribution<float> leaf_axial_twist_frequency_ratio_min{0.35f};
+  evo_engine::SingleDistribution<float> leaf_axial_twist_frequency_ratio_max{0.5f};
+  evo_engine::SingleDistribution<float> leaf_gravity_droop_compliance{0.0f};
+  evo_engine::PlottedDistribution<float> leaf_gravity_droop_age_response;
+  evo_engine::PlottedDistribution<float> leaf_flexural_stiffness_along_leaf;
+  evo_engine::SingleDistribution<float> leaf_damage_severity{0.0f};
   evo_engine::SingleDistribution<float> leaf_sheath_radius_ratio{1.05f};
+  evo_engine::SingleDistribution<float> leaf_sheath_cross_section_ratio{1.0f};
   evo_engine::SingleDistribution<float> leaf_sheath_wrap_angle{390.0f};         ///< Total wrap including overlap (deg).
   evo_engine::SingleDistribution<float> leaf_blade_stage1_length_ratio{0.33f};  ///< [deprecated]
   evo_engine::SingleDistribution<float> leaf_blade_stage2_length_ratio{0.34f};  ///< [deprecated]
@@ -78,6 +91,7 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   evo_engine::SingleDistribution<float> tiller_insertion_angle{35.0f, 5.0f};
   evo_engine::SingleDistribution<float> tiller_final_lean_angle{15.0f, 5.0f};
   evo_engine::SingleDistribution<float> tiller_azimuth_jitter{0.0f, 10.0f};
+  evo_engine::SingleDistribution<float> tiller_same_side_splay_angle{12.0f};
   float tiller_recovery_axis_fraction = 1.0f;
   evo_engine::SingleDistribution<float> tiller_leaf_count_ratio{0.90f, 0.03f};
   evo_engine::SingleDistribution<float> tiller_height_ratio{0.90f, 0.03f};
@@ -100,6 +114,7 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   evo_engine::SingleDistribution<float> lateral_bud_plastochron_scale{1.0f};
   evo_engine::SingleDistribution<float> maturity_initiation_coupling{0.0f};
   evo_engine::SingleDistribution<float> reference_maturity_gdd{600.0f};
+  bool finalize_snapshot_morphology = true;  ///< Complete snapshot organ dimensions without erasing posture age.
 
   // ===== Growth curves =====
   evo_engine::PlottedDistribution<float> internode_elongation_curve;
@@ -139,6 +154,9 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   float leaf_material_roughness = 0.72f;
   float leaf_material_metallic = 0.0f;
   float leaf_material_specular = 0.45f;
+  float leaf_material_subsurface_factor = 0.0f;
+  glm::vec3 leaf_material_subsurface_color{0.26f, 0.52f, 0.18f};
+  glm::vec3 leaf_material_subsurface_radius{0.001f};
 
   // ===== Stem/sheath-support material =====
   evo_engine::AssetRef stem_albedo_texture;

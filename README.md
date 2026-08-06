@@ -142,15 +142,39 @@ python PythonBinding\sorghum_generate_calibrated_field_scenes.py --skip-10x10 --
 Recalibrate all ten descriptors at the paper-validation sample sizes before scene generation with:
 
 ```bat
-python PythonBinding\sorghum_lsystem_calibrate_date_cultivar_descriptors.py --iteration-sample-count 1000 --validation-sample-count 10000 --max-iterations 6 --worker-count 4
+python PythonBinding\sorghum_lsystem_calibrate_date_cultivar_descriptors.py --iteration-sample-count 1000 --validation-sample-count 10000 --max-iterations 6 --single-process
 python PythonBinding\sorghum_migrate_fidelity_v4_descriptors.py
+python PythonBinding\sorghum_calibrate_morphology_allocation.py --sample-count 1000 --apply
+python PythonBinding\sorghum_calibrate_morphology_allocation.py --sample-count 1000 --validate-only
+python PythonBinding\sorghum_validate_2026_morphology.py --sample-count 1000
 python PythonBinding\sorghum_generate_calibrated_field_scenes.py
 ```
 
-The fidelity-v4 descriptors use crown-attached primary tillers, absolute rank-specific blade widths,
-descriptor-owned blade/sheath thickness, stem-fitted overlapping sheaths, subdivision-independent blade-margin
-waviness, the promoted 3x3 leaf atlas, and a continuous textured culm mesh. After the five-stage review is rendered,
-append and publish the mature 10x10 views with:
+These commands use the Release runtime by default. Single-process descriptor calibration avoids concurrent CUDA and
+asset-metadata access on Windows. The 2021 main-culm leaf-count and complete-plant height distributions are mandatory
+fit targets; the unknown-genotype 2026 measurements are reported as morphology priors rather than cultivar truth.
+The ten generated date/cultivar descriptors are measured-date snapshots finalized at their stage-specific GDD, so
+their saved geometry matches those calibration targets. The shared L-system remains time-resolved for future
+dynamic-growth work when snapshot finalization is disabled.
+
+The promoted descriptors use crown-attached primary tillers with distichous leaf-axil origins and restrained same-side
+crown splay, absolute rank-specific blade widths,
+descriptor-owned blade/sheath thickness, stem-fitted overlapping sheaths, a reduced static gravity response driven by
+leaf thermal age and along-blade stiffness, deterministic plant-coherent wind deflection and twist, multi-scale
+centerline and margin waviness, the promoted 3x3 leaf atlas, constrained rank/age color and damage variation,
+elliptical sheaths, main-culm lean, and a continuous textured culm mesh. The first three stages use 50% wider blades
+without changing their authored physical thicknesses.
+
+The manual soil mesh carries baked geometric relief derived from its PBR height map, so the EvoEngine RT review uses
+real geometry rather than a raster-only displacement approximation. Rebuild that mesh after replacing the manual PBR
+set with:
+
+```bat
+python PythonBinding\sorghum_bake_soil_relief.py
+```
+
+The scene generator conforms each plant root to the displaced ground surface.
+After the five-stage review is rendered, append and publish the mature 10x10 views with:
 
 ```bat
 python PythonBinding\sorghum_render_10x10_fidelity_review.py --width 3840 --height 2160 --samples 128 --bounces 4 --publish-drive
@@ -159,6 +183,44 @@ python PythonBinding\sorghum_render_10x10_fidelity_review.py --width 3840 --heig
 Each scene is regrown with deterministic seed `2000000`. All nine views per stage use the OptiX skydome with a
 physical `0.526` degree sun, 128 samples, and four bounces. Temporary review cameras never save changes back to scene
 assets. Measurement dates appear in labels and manifests while generated filenames use `GrowthStage01..05`.
+
+Run replicated PARBAR illumination estimates for all five current 4x10 scenes with:
+
+```bat
+python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py --replicates 10000 --probes-per-panel 100 --samples 64 --bounces 4 --output-dir out\handoff\sorghum_4x10_parbar_10000 --checkpoint-dir out\handoff\.sorghum_4x10_parbar_10000_checkpoints
+python PythonBinding\sorghum_render_4x10_parbar_sensor_illumination_pngs.py --handoff-dir out\handoff\sorghum_4x10_parbar_10000 --expected-replicates 10000
+```
+
+The handoff regenerates 40 uniquely seeded rooted plants per scene and replicate, writes online mean, sample standard
+deviation, standard error, and 95% interval columns for every PARBAR probe, and stores driver, runtime, and full
+project-asset-tree hashes in
+`run_manifest.json`. Add `--resume` to the first command with the same arguments after an interruption. Values remain
+relative simulated light estimates rather than calibrated physical PAR units. The default ten-replicate engine batch
+restarts EvoEngine at durable checkpoint boundaries to bound long-campaign memory use; tune it with
+`--engine-batch-size`. Campaign and per-date worker locks reject concurrent use of the same checkpoint directory, and
+the parent terminates its active worker when an interruption can be handled.
+
+`PythonBinding/sorghum_4x10_scene.py` is the small importable boundary for custom illumination code. Call
+`query_4x10_scene(...)` to resolve a published date, `prepare_4x10_scene(...)` once after importing EvoEngine, and
+`grow_4x10_scene(...)` for each deterministic morphology seed. The returned scene declares EvoEngine Y-up coordinates;
+`plant_organ_ids(...)` provides stable plant, main-culm, tiller, and leaf IDs. Probe creation and all illumination
+settings remain caller-owned, so alternate probe logic can sample the published PARBAR geometry without changing the
+scene API. The existing CSV command above uses this API and remains the supported averaged 10,000-replicate runner.
+
+```python
+from pathlib import Path
+from sorghum_4x10_scene import query_4x10_scene, prepare_4x10_scene, grow_4x10_scene
+
+project = Path("Resources/DigitalAgricultureProject")
+scene = query_4x10_scene(
+    project / "Assets/GeneratedAssets/Reports/field_manifest.csv",
+    Path("GeneratedAssets/Descriptors"),
+    "2021-08-30",
+)
+prepare_4x10_scene(evo, project / "test_lsystem_sorghum.eveproj", packages, scene, 2_000_000, 2 / 3, 2, 30000)
+probes = create_my_parbar_probes(evo, scene)
+grow_4x10_scene(evo, scene, geometry_seed=2_001_000, max_wait_frames=30000)
+```
 
 ## Related Publications
 
