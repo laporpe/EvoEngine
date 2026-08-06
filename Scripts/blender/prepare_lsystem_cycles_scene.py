@@ -540,6 +540,8 @@ def configure_cycles(samples: int, resolution_x: int, resolution_y: int) -> None
         except TypeError:
             continue
     else:
+        # Make the compatibility fallback explicit so reopening the file cannot
+        # inherit a workstation default.
         scene.view_settings.look = "None"
     scene.view_settings.exposure = -0.9
     scene.view_settings.gamma = 1.0

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 import tempfile
 import unittest
 from pathlib import Path
@@ -50,6 +51,35 @@ class PresentationGradeTest(unittest.TestCase):
 class LeafPresentationTest(unittest.TestCase):
     def test_missing_optional_engine_api_is_a_no_op(self) -> None:
         self.assertEqual(0, presentation.set_ground_extension(SimpleNamespace(), True))
+
+    def test_ground_extension_uses_authored_scale_and_bounded_grid(self) -> None:
+        calls: list[tuple[object, ...]] = []
+        evo = SimpleNamespace(
+            ConfigurePresentationGroundExtension=lambda *args: calls.append(args) or 1
+        )
+
+        self.assertEqual(1, presentation.set_ground_extension(evo, True))
+        self.assertEqual(
+            [(True, 160.0, 2.0, 1.0)],
+            calls,
+        )
+
+    def test_soil_uv_matches_authored_warp(self) -> None:
+        self.assertEqual((0.0, 0.0), presentation.soil_uv_at(0.0, 0.0))
+        u, v = presentation.soil_uv_at(2.0, -3.0)
+        two_pi = 2.0 * math.pi
+        expected_u = (
+            1.0
+            + 0.16 * math.sin(two_pi * -3.0 / 7.3)
+            + 0.07 * math.sin(two_pi * -1.0 / 3.9)
+        )
+        expected_v = (
+            -1.5
+            + 0.14 * math.sin(two_pi * 2.0 / 8.1)
+            - 0.06 * math.sin(two_pi * 5.0 / 4.7)
+        )
+        self.assertAlmostEqual(expected_u, u)
+        self.assertAlmostEqual(expected_v, v)
 
 
 if __name__ == "__main__":

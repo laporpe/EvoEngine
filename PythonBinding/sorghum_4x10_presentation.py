@@ -18,7 +18,9 @@ class Bounds:
 
     @property
     def center(self) -> Vec3:
-        return tuple((low + high) * 0.5 for low, high in zip(self.minimum, self.maximum))
+        return tuple(
+            (low + high) * 0.5 for low, high in zip(self.minimum, self.maximum)
+        )
 
     def corners(self) -> tuple[Vec3, ...]:
         return tuple(
@@ -49,7 +51,8 @@ class PresentationProfile:
     ambient_light_intensity: float = 0.14
     gamma: float = 2.2
     ground_extension_size_m: float = 160.0
-    ground_texture_repeat_m: float = 4.0
+    ground_texture_repeat_m: float = 2.0
+    ground_extension_grid_spacing_m: float = 1.0
     brightness: float = 0.94
     contrast: float = 0.95
     saturation: float = 0.90
@@ -62,6 +65,21 @@ class PresentationProfile:
 
 
 DEFAULT_PROFILE = PresentationProfile()
+
+
+def soil_uv_at(x: float, z: float, footprint_m: float = 2.0) -> tuple[float, float]:
+    """Match the canonical ground mesh's authored, world-scale UV mapping."""
+    if not math.isfinite(footprint_m) or footprint_m <= 0.0:
+        raise ValueError("soil texture footprint must be positive and finite")
+    two_pi = 2.0 * math.pi
+    return (
+        x / footprint_m
+        + 0.16 * math.sin(two_pi * z / 7.3)
+        + 0.07 * math.sin(two_pi * (x + z) / 3.9),
+        z / footprint_m
+        + 0.14 * math.sin(two_pi * x / 8.1)
+        - 0.06 * math.sin(two_pi * (x - z) / 4.7),
+    )
 
 
 def _add(a: Vec3, b: Vec3) -> Vec3:
@@ -207,7 +225,9 @@ def apply_photo_grade(
         Image.merge("RGB", (red, green, blue)).save(destination, "PNG")
 
 
-def configure_lighting(evo: object, profile: PresentationProfile = DEFAULT_PROFILE) -> None:
+def configure_lighting(
+    evo: object, profile: PresentationProfile = DEFAULT_PROFILE
+) -> None:
     def vec3(values: Vec3) -> object:
         result = evo.Vec3()
         result.x, result.y, result.z = values
@@ -238,5 +258,6 @@ def set_ground_extension(
             enabled,
             profile.ground_extension_size_m,
             profile.ground_texture_repeat_m,
+            profile.ground_extension_grid_spacing_m,
         )
     )

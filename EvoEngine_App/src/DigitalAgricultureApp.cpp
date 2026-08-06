@@ -427,9 +427,11 @@ std::string EscapeJsonString(const std::string& value) {
 
 bool CopyLeafVariantHeightTextureForBlenderExport(const std::filesystem::path& output_path,
                                                   std::filesystem::path& copied_path) {
-  const std::array<std::filesystem::path, 3> candidates = {
+  const std::array<std::filesystem::path, 4> candidates = {
       ProjectManager::GetAssetsFolderPath() / "ManualAssets" / "Materials" / "SorghumLeaves" / "LeafAtlas" / "atlas" /
           "sorghum_lsystem_leaf_variants_height.png",
+      ProjectManager::GetAssetsFolderPath() / "GeneratedAssets" / "Materials" / "SorghumLeaves" / "LeafAtlas" /
+          "atlas" / "sorghum_lsystem_leaf_variants_height.png",
       std::filesystem::current_path() / "Resources" / "DigitalAgricultureProject" / "Assets" / "ManualAssets" /
           "Materials" / "SorghumLeaves" / "LeafAtlas" / "atlas" / "sorghum_lsystem_leaf_variants_height.png",
       std::filesystem::current_path() / "Resources" / "LSystemProject" / "Assets" / "SorghumLeafMaterials" /

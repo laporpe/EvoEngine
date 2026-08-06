@@ -36,6 +36,7 @@ from sorghum_4x10_illumination_video import (
     prepare_capture_camera,
     require_dependencies as require_video_dependencies,
     running_means as video_running_means,
+    solar_frame_for_replicate,
     staging_root as video_staging_root,
     validate_configuration as validate_video_configuration,
     validate_staged_prefix,
@@ -570,6 +571,7 @@ def checkpoint_fingerprint(
         "video": {
             "enabled": args.video,
             "version": VIDEO_VERSION,
+            "solar_sweep": args.video_solar_sweep,
             "render_samples": args.video_samples,
             "render_bounces": args.video_bounces,
             "spec": {
@@ -658,6 +660,24 @@ def cleanup_new_default_scene_side_effects(project: Path, before: set[Path]) -> 
         except ValueError:
             continue
         resolved.unlink(missing_ok=True)
+
+
+def snapshot_runtime_metadata(project: Path) -> dict[Path, bytes | None]:
+    project = project.resolve()
+    paths = (
+        project,
+        project.parent / "Assets" / "ManualAssets" / "Materials.evefoldermeta",
+    )
+    return {path: path.read_bytes() if path.is_file() else None for path in paths}
+
+
+def restore_runtime_metadata(snapshot: dict[Path, bytes | None]) -> None:
+    for path, payload in snapshot.items():
+        if payload is None:
+            path.unlink(missing_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(payload)
 
 
 def vec3(value: object) -> tuple[float, float, float]:
@@ -966,10 +986,15 @@ def sensor_rows_for_date(
     video_root = video_staging_root(args.checkpoint_dir)
     if args.video:
         validate_staged_prefix(
-            video_root, date, start_replicate, args.probes_per_panel
+            video_root,
+            date,
+            start_replicate,
+            args.probes_per_panel,
+            args.video_solar_sweep,
+            args.replicates,
         )
 
-    project_bytes = args.project.read_bytes()
+    runtime_metadata = snapshot_runtime_metadata(args.project)
     side_effects_before = collect_default_scene_side_effects(args.project)
     sensors = None
     try:
@@ -986,12 +1011,17 @@ def sensor_rows_for_date(
             args.max_wait_frames,
         )
         sensors = evo.CreateParbarTopFaceSensorGroup(args.probes_per_panel)
-        if args.video:
-            prepare_capture_camera(evo, video_root, date)
-            evo.LoopFrames(1)
         next_replicate = start_replicate
+        capture_jobs = []
         started = time.perf_counter()
         try:
+            # Keep presentation work out of the scientific loop.  Adding and
+            # removing the render-only ground extension rebuilds the OptiX
+            # scene, which can perturb seeded edge intersections even after
+            # the entity is removed.  Finish the whole engine batch of fixed-
+            # sun PARBAR estimates first, then regrow the identical geometry
+            # seeds for camera capture.  A failed capture leaves the durable
+            # checkpoint at the start of the batch so the batch is retried.
             for replicate in range(start_replicate, stop_replicate):
                 geometry_seed = geometry_seed_for_replicate(
                     args.geometry_seed, args.geometry_seed_stride, date, replicate
@@ -1021,16 +1051,18 @@ def sensor_rows_for_date(
                         )
                     accumulators[key].add(sensor_values(record))
                 if args.video:
-                    capture_realization(
-                        evo,
-                        video_root,
-                        date,
-                        replicate + 1,
-                        video_running_means(accumulators, args.probes_per_panel),
-                        args.probes_per_panel,
-                        args.video_samples,
-                        args.video_bounces,
+                    capture_jobs.append(
+                        (
+                            replicate,
+                            geometry_seed,
+                            video_running_means(accumulators, args.probes_per_panel),
+                            solar_frame_for_replicate(
+                                date, replicate + 1, args.replicates
+                            ) if args.video_solar_sweep else None,
+                        )
                     )
+                    continue
+
                 next_replicate = replicate + 1
                 checkpoint_due = (
                     next_replicate % args.checkpoint_interval == 0
@@ -1057,6 +1089,44 @@ def sensor_rows_for_date(
                         f"elapsed_s={elapsed:.1f} eta_s={remaining:.1f}",
                         flush=True,
                     )
+
+            if args.video:
+                prepare_capture_camera(evo, video_root, date)
+                evo.LoopFrames(1)
+                for replicate, geometry_seed, values, solar_frame in capture_jobs:
+                    grow_4x10_scene(evo, scene, geometry_seed, args.max_wait_frames)
+                    capture_realization(
+                        evo,
+                        video_root,
+                        date,
+                        replicate + 1,
+                        values,
+                        args.probes_per_panel,
+                        args.video_samples,
+                        args.video_bounces,
+                        solar_frame=solar_frame,
+                    )
+                    next_replicate = replicate + 1
+                    if (
+                        next_replicate % args.progress_interval == 0
+                        or next_replicate == stop_replicate
+                    ):
+                        elapsed = time.perf_counter() - started
+                        completed = next_replicate - start_replicate
+                        remaining = (
+                            (args.replicates - next_replicate) * elapsed / completed
+                            if completed
+                            else 0.0
+                        )
+                        print(
+                            f"{date}: replicates={next_replicate}/{args.replicates} "
+                            f"elapsed_s={elapsed:.1f} eta_s={remaining:.1f}",
+                            flush=True,
+                        )
+                if next_replicate == stop_replicate:
+                    save_checkpoint(
+                        checkpoint_path, fingerprint, next_replicate, accumulators
+                    )
         finally:
             if accumulators and all(
                 accumulator.count == next_replicate
@@ -1080,7 +1150,7 @@ def sensor_rows_for_date(
             if not args.video:
                 evo.Terminate()
         finally:
-            args.project.write_bytes(project_bytes)
+            restore_runtime_metadata(runtime_metadata)
             cleanup_new_default_scene_side_effects(args.project, side_effects_before)
     return sorted(
         rows,
@@ -1161,7 +1231,9 @@ def worker_command(
         str(sensor_csv),
         "--worker-lock",
         str(worker_lock),
-    ] + (["--resume"] if resume else []) + (["--video"] if args.video else [])
+    ] + (["--resume"] if resume else []) + (["--video"] if args.video else []) + (
+        ["--video-solar-sweep"] if args.video_solar_sweep else []
+    )
 
 
 def verify_campaign_fingerprints(
@@ -1276,6 +1348,8 @@ def sensor_rows_with_workers_locked(
                     date,
                     next_replicate,
                     args.probes_per_panel,
+                    getattr(args, "video_solar_sweep", False),
+                    args.replicates,
                 )
             if returncode != 0 and not capture_worker_completed:
                 raise RuntimeError(
@@ -1519,6 +1593,7 @@ Progress and ETA are streamed to the parent process. Atomic per-date checkpoints
 - Push normal distance: {args.push_normal_distance} m
 {f'- Campaign video: {VIDEO_SPEC.seconds_per_date} seconds per date at {VIDEO_SPEC.fps} FPS, {VIDEO_SPEC.width}x{VIDEO_SPEC.height}' if args.video else '- Campaign video: disabled'}
 {f'- Camera render: {args.video_samples} samples and {args.video_bounces} bounces per pixel (independent of PARBAR ray settings)' if args.video else ''}
+{f'- Visual solar sweep: NSRDB site 33.08 N, 111.97 W sunrise-to-sunset; the reference scientific sun is restored after every capture' if args.video_solar_sweep else ''}
 
 ## Row Counts
 
@@ -1547,6 +1622,7 @@ def write_run_manifest(
         "video": {
             "enabled": args.video,
             "file": f"visualizations/{VIDEO_NAME}" if args.video else None,
+            "solar_sweep": args.video_solar_sweep,
             "frames_per_second": VIDEO_SPEC.fps,
             "seconds_per_date": VIDEO_SPEC.seconds_per_date,
             "scene_fraction": VIDEO_SPEC.scene_fraction,
@@ -1673,6 +1749,14 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Also render the 60 FPS, five-second-per-date scene/PARBAR convergence video.",
     )
+    parser.add_argument(
+        "--video-solar-sweep",
+        action="store_true",
+        help=(
+            "Animate the presentation-only sun from Arizona sunrise to sunset "
+            "across the per-date realizations; requires --video."
+        ),
+    )
     parser.add_argument("--smoke", action="store_true", help=argparse.SUPPRESS)
     parser.add_argument(
         "--worker-sensor-csv", type=Path, default=None, help=argparse.SUPPRESS
@@ -1717,6 +1801,7 @@ def run_parent_campaign(
             sensor_rows,
             args.video_samples,
             args.video_bounces,
+            solar_sweep=args.video_solar_sweep,
         )
         if args.video
         else ()
@@ -1821,6 +1906,8 @@ def main() -> None:
             args.dates, args.replicates, args.probes_per_panel
         )
         require_video_dependencies()
+    elif args.video_solar_sweep:
+        raise ValueError("--video-solar-sweep requires --video")
 
     manifest_rows = load_height_manifest(args.source_root, args.dates)
     plant_counts = plant_counts_by_date(manifest_rows, args.dates)

@@ -1262,6 +1262,7 @@ def main() -> None:
         soil_context,
         args,
     )
+    print(f"SWEEP_BLENDER_GROUND passed output={args.output_blend}")
 
 
 if __name__ == "__main__":
