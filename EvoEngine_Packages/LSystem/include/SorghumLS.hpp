@@ -44,6 +44,8 @@ class SorghumLS final : public LSystemComponentBase<SorghumLS> {
   uint32_t last_internode_count = 0;
   uint32_t last_leaf_count = 0;
   uint32_t last_live_leaf_count = 0;
+  uint32_t last_panicle_branch_count = 0;
+  uint32_t last_panicle_spikelet_count = 0;
   uint32_t last_invalid_instance_count = 0;
 
   float GetInfancyTargetGDD() const {
@@ -52,6 +54,10 @@ class SorghumLS final : public LSystemComponentBase<SorghumLS> {
 
   void GenerateGeometryEntities(bool uncapped_growth = false, bool reuse_geometry_entities = false);
   [[nodiscard]] std::shared_ptr<const SorghumGeometrySnapshot> GenerateGeometrySnapshot(bool uncapped_growth = false,
+                                                                                        uint32_t max_growth_steps = 0);
+  /// Advance an already-initialized plant to target_gdd without replaying its
+  /// prior thermal history.  Reinitializes safely when target_gdd is rewound.
+  [[nodiscard]] std::shared_ptr<const SorghumGeometrySnapshot> AdvanceGeometrySnapshot(bool uncapped_growth = false,
                                                                                         uint32_t max_growth_steps = 0);
   void GeneratePreviewGeometryEntities(float preview_target_gdd, uint32_t preview_max_growth_steps);
   void GrowToTargetGDD(bool uncapped_growth = false, uint32_t max_growth_steps = 0);

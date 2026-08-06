@@ -212,6 +212,11 @@ void SorghumGrowthModel::FinalizeSnapshotMorphology() {
           apex.age_gdd = apex.sampled_plastochron_gdd;
           pending = true;
         }
+      } else if (node.data.Is<SorghumPanicleBud>()) {
+        node.data.Get<SorghumPanicleBud>().age_gdd = node.data.Get<SorghumPanicleBud>().initiation_gdd;
+        pending = true;
+      } else if (node.data.Is<SorghumPanicleBranch>() && !node.data.Get<SorghumPanicleBranch>().spikelets_emitted) {
+        pending = true;
       }
     }
     if (!pending || !engine_.ApplyTopologyRules(graph, rng_))
@@ -243,6 +248,22 @@ void SorghumGrowthModel::FinalizeSnapshotMorphology() {
       leaf.curling = leaf.target_curling;
       leaf.waviness = leaf.target_waviness;
       leaf.growth_progress = 1.0f;
+    } else if (node.data.Is<SorghumPanicleRachis>()) {
+      auto& rachis = node.data.Get<SorghumPanicleRachis>();
+      rachis.length = rachis.target_length;
+      rachis.thickness = rachis.target_thickness;
+      rachis.growth_progress = 1.0f;
+    } else if (node.data.Is<SorghumPanicleBranch>()) {
+      auto& branch = node.data.Get<SorghumPanicleBranch>();
+      branch.length = branch.target_length;
+      branch.thickness = branch.target_thickness;
+      branch.growth_progress = 1.0f;
+    } else if (node.data.Is<SorghumPanicleSpikelet>()) {
+      auto& spikelet = node.data.Get<SorghumPanicleSpikelet>();
+      spikelet.pedicel_length = spikelet.target_pedicel_length;
+      spikelet.spikelet_length = spikelet.target_spikelet_length;
+      spikelet.radius = spikelet.target_radius;
+      spikelet.growth_progress = 1.0f;
     }
   }
   PropagateGeometry();
@@ -290,6 +311,27 @@ void SorghumGrowthModel::UpdateNodeInfoImpl(LGraphNode<SorghumModuleData>& node)
     return;
   }
 
+  if (node.data.Is<SorghumPanicleRachis>()) {
+    const auto& rachis = node.data.Get<SorghumPanicleRachis>();
+    node.info.length = rachis.length;
+    node.info.thickness = std::max(0.00002f, rachis.thickness);
+    return;
+  }
+
+  if (node.data.Is<SorghumPanicleBranch>()) {
+    const auto& branch = node.data.Get<SorghumPanicleBranch>();
+    node.info.length = branch.length;
+    node.info.thickness = std::max(0.00002f, branch.thickness);
+    return;
+  }
+
+  if (node.data.Is<SorghumPanicleSpikelet>()) {
+    const auto& spikelet = node.data.Get<SorghumPanicleSpikelet>();
+    node.info.length = spikelet.pedicel_length + spikelet.spikelet_length;
+    node.info.thickness = std::max(0.00002f, spikelet.radius * 2.0f);
+    return;
+  }
+
   // Root / Apex / TillerBud / PanicleBud carry no axis geometry.
   node.info.length = 0.0f;
   node.info.thickness = 0.0f;
@@ -299,7 +341,8 @@ bool SorghumGrowthModel::IsDevelopmentalSymbolImpl(const LGraphNode<SorghumModul
   // Apex is developmental until vigor is exhausted (and then converted to
   // PanicleBud). TillerBud is developmental until its configured main-leaf
   // activation stage and then becomes an order-1 Apex.
-  return node.data.Is<SorghumApex>() || node.data.Is<SorghumTillerBud>();
+  return node.data.Is<SorghumApex>() || node.data.Is<SorghumTillerBud>() || node.data.Is<SorghumPanicleBud>() ||
+         (node.data.Is<SorghumPanicleBranch>() && !node.data.Get<SorghumPanicleBranch>().spikelets_emitted);
 }
 
 glm::quat SorghumGrowthModel::ComputeChildLocalRotationImpl(const LGraphNode<SorghumModuleData>& node,
@@ -335,12 +378,30 @@ glm::quat SorghumGrowthModel::ComputeChildLocalRotationImpl(const LGraphNode<Sor
     }
     return local;
   }
+  if (node.data.Is<SorghumPanicleBranch>()) {
+    const auto& branch = node.data.Get<SorghumPanicleBranch>();
+    return glm::normalize(glm::angleAxis(glm::radians(branch.roll_angle), glm::vec3(0, 0, -1)) *
+                          glm::angleAxis(glm::radians(branch.branch_angle), glm::vec3(1, 0, 0)));
+  }
+  if (node.data.Is<SorghumPanicleSpikelet>()) {
+    const auto& spikelet = node.data.Get<SorghumPanicleSpikelet>();
+    return glm::normalize(glm::angleAxis(glm::radians(spikelet.roll_angle), glm::vec3(0, 0, -1)) *
+                          glm::angleAxis(glm::radians(spikelet.branch_angle), glm::vec3(1, 0, 0)));
+  }
   // Leaves, buds, and apices contribute no axis change.
   return glm::quat(1, 0, 0, 0);
 }
 
 glm::vec3 SorghumGrowthModel::ComputeChildGlobalPositionImpl(const LGraphNode<SorghumModuleData>& node,
                                                              const LGraphNode<SorghumModuleData>& parent) const {
+  if (node.data.Is<SorghumPanicleBranch>() && parent.data.Is<SorghumPanicleRachis>()) {
+    return glm::mix(parent.info.global_position, parent.info.GetGlobalEndPosition(),
+                    std::clamp(node.data.Get<SorghumPanicleBranch>().attachment_fraction, 0.0f, 1.0f));
+  }
+  if (node.data.Is<SorghumPanicleSpikelet>() && parent.data.Is<SorghumPanicleBranch>()) {
+    return glm::mix(parent.info.global_position, parent.info.GetGlobalEndPosition(),
+                    std::clamp(node.data.Get<SorghumPanicleSpikelet>().attachment_fraction, 0.0f, 1.0f));
+  }
   return ComputeSorghumChildGlobalPosition(node, parent);
 }
 

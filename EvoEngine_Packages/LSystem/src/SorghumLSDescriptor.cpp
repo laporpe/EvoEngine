@@ -296,6 +296,25 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   ClampSingleDistribution(descriptor.leaf_wilting_years, 0.05f, 8.0f, 4.0f);
   descriptor.leaf_wilting_years.mean =
       std::clamp(descriptor.leaf_wilting_years.mean, 0.05f, std::max(0.05f, descriptor.leaf_lifespan_years.mean));
+  ClampSingleDistribution(descriptor.flag_leaf_length_scale, 0.1f, 1.5f, 0.7f);
+  ClampSingleDistribution(descriptor.flag_leaf_width_scale, 0.1f, 1.5f, 0.7f);
+  ClampSingleDistribution(descriptor.flag_leaf_insertion_angle_offset, -90.0f, 90.0f, 45.0f);
+  ClampSingleDistribution(descriptor.flag_leaf_bending_scale, 0.0f, 1.5f, 0.7f);
+
+  ClampSingleDistribution(descriptor.panicle_initiation_gdd, 0.0f, 2000.0f, 1000.0f);
+  ClampSingleDistribution(descriptor.panicle_maturity_gdd, 1.0f, 3000.0f, 1500.0f);
+  ClampSingleDistribution(descriptor.panicle_peduncle_length_m, 0.0f, 1.0f, 0.5f);
+  ClampSingleDistribution(descriptor.panicle_rachis_length_m, 0.02f, 1.0f, 0.5f);
+  ClampSingleDistribution(descriptor.panicle_rachis_radius_m, 0.0005f, 0.04f, 0.02f);
+  ClampSingleDistribution(descriptor.panicle_primary_branch_count, 1.0f, 64.0f, 32.0f);
+  ClampSingleDistribution(descriptor.panicle_spikelet_pairs_per_branch, 1.0f, 32.0f, 16.0f);
+  ClampSingleDistribution(descriptor.panicle_branch_length_m, 0.005f, 0.5f, 0.25f);
+  ClampSingleDistribution(descriptor.panicle_branch_length_taper, 0.05f, 1.0f, 0.5f);
+  ClampSingleDistribution(descriptor.panicle_branch_radius_m, 0.0001f, 0.02f, 0.01f);
+  ClampSingleDistribution(descriptor.panicle_branch_angle_degrees, 0.0f, 85.0f, 45.0f);
+  ClampSingleDistribution(descriptor.panicle_spikelet_length_m, 0.001f, 0.05f, 0.025f);
+  ClampSingleDistribution(descriptor.panicle_spikelet_radius_m, 0.0002f, 0.02f, 0.01f);
+  ClampSingleDistribution(descriptor.panicle_pedicel_length_m, 0.0f, 0.05f, 0.025f);
 
   ClampSingleDistribution(descriptor.tiller_count, 0.0f, 20.0f, 10.0f);
   descriptor.tiller_count_min = std::clamp(descriptor.tiller_count_min, 0, 6);
@@ -356,6 +375,9 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   descriptor.stem_material_roughness = std::clamp(descriptor.stem_material_roughness, 0.0f, 1.0f);
   descriptor.stem_material_metallic = std::clamp(descriptor.stem_material_metallic, 0.0f, 1.0f);
   descriptor.stem_material_specular = std::clamp(descriptor.stem_material_specular, 0.0f, 1.0f);
+  descriptor.panicle_immature_color = glm::clamp(descriptor.panicle_immature_color, glm::vec3(0.0f), glm::vec3(1.0f));
+  descriptor.panicle_mature_color = glm::clamp(descriptor.panicle_mature_color, glm::vec3(0.0f), glm::vec3(1.0f));
+  descriptor.panicle_material_roughness = std::clamp(descriptor.panicle_material_roughness, 0.0f, 1.0f);
   descriptor.culm_radial_segments = std::clamp(descriptor.culm_radial_segments, 8u, 64u);
   descriptor.culm_node_radius_scale = std::clamp(descriptor.culm_node_radius_scale, 1.0f, 1.5f);
   descriptor.culm_texture_repeat_m = std::clamp(descriptor.culm_texture_repeat_m, 0.01f, 5.0f);
@@ -471,6 +493,28 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.leaf_wilting_years = leaf_wilting_years;
   p.leaf_wilting_years.mean = std::max(0.05f, p.leaf_wilting_years.mean);
   p.leaf_wilting_years.deviation = std::max(0.0f, p.leaf_wilting_years.deviation);
+  p.flag_leaf_length_scale = std::clamp(SampleDistribution(flag_leaf_length_scale, rng), 0.1f, 1.5f);
+  p.flag_leaf_width_scale = std::clamp(SampleDistribution(flag_leaf_width_scale, rng), 0.1f, 1.5f);
+  p.flag_leaf_insertion_angle_offset = SampleDistribution(flag_leaf_insertion_angle_offset, rng);
+  p.flag_leaf_bending_scale = std::clamp(SampleDistribution(flag_leaf_bending_scale, rng), 0.0f, 1.5f);
+
+  p.enable_panicle = enable_panicle;
+  p.panicle_initiation_gdd = std::max(0.0f, SampleDistribution(panicle_initiation_gdd, rng));
+  p.panicle_maturity_gdd = std::max(1.0f, SampleDistribution(panicle_maturity_gdd, rng));
+  p.panicle_peduncle_length_m = std::max(0.0f, SampleDistribution(panicle_peduncle_length_m, rng));
+  p.panicle_rachis_length_m = std::max(0.02f, SampleDistribution(panicle_rachis_length_m, rng));
+  p.panicle_rachis_radius_m = std::max(0.0005f, SampleDistribution(panicle_rachis_radius_m, rng));
+  p.panicle_primary_branch_count = std::clamp(
+      static_cast<int>(std::round(SampleDistribution(panicle_primary_branch_count, rng))), 1, 64);
+  p.panicle_spikelet_pairs_per_branch = std::clamp(
+      static_cast<int>(std::round(SampleDistribution(panicle_spikelet_pairs_per_branch, rng))), 1, 32);
+  p.panicle_branch_length_m = std::max(0.005f, SampleDistribution(panicle_branch_length_m, rng));
+  p.panicle_branch_length_taper = std::clamp(SampleDistribution(panicle_branch_length_taper, rng), 0.05f, 1.0f);
+  p.panicle_branch_radius_m = std::max(0.0001f, SampleDistribution(panicle_branch_radius_m, rng));
+  p.panicle_branch_angle_degrees = std::clamp(SampleDistribution(panicle_branch_angle_degrees, rng), 0.0f, 85.0f);
+  p.panicle_spikelet_length_m = std::max(0.001f, SampleDistribution(panicle_spikelet_length_m, rng));
+  p.panicle_spikelet_radius_m = std::max(0.0002f, SampleDistribution(panicle_spikelet_radius_m, rng));
+  p.panicle_pedicel_length_m = std::max(0.0f, SampleDistribution(panicle_pedicel_length_m, rng));
 
   // Tillering.
   p.tiller_count = std::clamp(static_cast<int>(std::round(SampleDistribution(tiller_count, rng))), tiller_count_min,
@@ -851,6 +895,37 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     ImGui::TreePop();
   }
 
+  if (ImGui::TreeNodeEx("Flag Leaf", ImGuiTreeNodeFlags_DefaultOpen)) {
+    ImGui::TextDisabled("The terminal main-culm phytomer is tagged as the flag leaf.");
+    changed |= flag_leaf_length_scale.Draw("Blade Length Scale", 0.01f);
+    changed |= flag_leaf_width_scale.Draw("Blade Width Scale", 0.01f);
+    changed |= flag_leaf_insertion_angle_offset.Draw("Insertion-Angle Offset (deg)", 0.25f);
+    changed |= flag_leaf_bending_scale.Draw("Bending Scale", 0.01f);
+    ImGui::TreePop();
+  }
+
+  if (ImGui::TreeNodeEx("Panicle", ImGuiTreeNodeFlags_DefaultOpen)) {
+    changed |= ImGui::Checkbox("Enable Panicle", &enable_panicle);
+    changed |= panicle_initiation_gdd.Draw("Initiation GDD", 1.0f);
+    changed |= panicle_maturity_gdd.Draw("Maturity GDD", 5.0f);
+    changed |= panicle_peduncle_length_m.Draw("Exserted Peduncle Length (m)", 0.005f);
+    changed |= panicle_rachis_length_m.Draw("Rachis Length (m)", 0.005f);
+    changed |= panicle_rachis_radius_m.Draw("Rachis Radius (m)", 0.0002f);
+    changed |= panicle_primary_branch_count.Draw("Primary Branch Count", 0.5f);
+    changed |= panicle_spikelet_pairs_per_branch.Draw("Spikelet Triads per Branch", 0.5f);
+    changed |= panicle_branch_length_m.Draw("Branch Length (m)", 0.002f);
+    changed |= panicle_branch_length_taper.Draw("Branch Envelope Taper", 0.01f);
+    changed |= panicle_branch_radius_m.Draw("Branch Radius (m)", 0.0001f);
+    changed |= panicle_branch_angle_degrees.Draw("Branch Angle (deg)", 0.25f);
+    changed |= panicle_spikelet_length_m.Draw("Spikelet Length (m)", 0.0005f);
+    changed |= panicle_spikelet_radius_m.Draw("Spikelet Radius (m)", 0.0001f);
+    changed |= panicle_pedicel_length_m.Draw("Pedicel Length (m)", 0.0005f);
+    changed |= ImGui::ColorEdit3("Immature Color", &panicle_immature_color.x);
+    changed |= ImGui::ColorEdit3("Mature Color", &panicle_mature_color.x);
+    changed |= ImGui::DragFloat("Roughness", &panicle_material_roughness, 0.01f, 0.0f, 1.0f);
+    ImGui::TreePop();
+  }
+
   if (ImGui::TreeNodeEx("Tillering", ImGuiTreeNodeFlags_DefaultOpen)) {
     ImGui::TextDisabled("v4 crown-attached peer-height primary tillers; no secondary tillers");
     changed |= tiller_count.Draw("Tiller Count", 0.5f);
@@ -1142,6 +1217,26 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   // Leaf lifecycle.
   target.leaf_lifespan_years.Save("leaf_lifespan_years", out);
   target.leaf_wilting_years.Save("leaf_wilting_years", out);
+  target.flag_leaf_length_scale.Save("flag_leaf_length_scale", out);
+  target.flag_leaf_width_scale.Save("flag_leaf_width_scale", out);
+  target.flag_leaf_insertion_angle_offset.Save("flag_leaf_insertion_angle_offset", out);
+  target.flag_leaf_bending_scale.Save("flag_leaf_bending_scale", out);
+
+  out << YAML::Key << "enable_panicle" << YAML::Value << target.enable_panicle;
+  target.panicle_initiation_gdd.Save("panicle_initiation_gdd", out);
+  target.panicle_maturity_gdd.Save("panicle_maturity_gdd", out);
+  target.panicle_peduncle_length_m.Save("panicle_peduncle_length_m", out);
+  target.panicle_rachis_length_m.Save("panicle_rachis_length_m", out);
+  target.panicle_rachis_radius_m.Save("panicle_rachis_radius_m", out);
+  target.panicle_primary_branch_count.Save("panicle_primary_branch_count", out);
+  target.panicle_spikelet_pairs_per_branch.Save("panicle_spikelet_pairs_per_branch", out);
+  target.panicle_branch_length_m.Save("panicle_branch_length_m", out);
+  target.panicle_branch_length_taper.Save("panicle_branch_length_taper", out);
+  target.panicle_branch_radius_m.Save("panicle_branch_radius_m", out);
+  target.panicle_branch_angle_degrees.Save("panicle_branch_angle_degrees", out);
+  target.panicle_spikelet_length_m.Save("panicle_spikelet_length_m", out);
+  target.panicle_spikelet_radius_m.Save("panicle_spikelet_radius_m", out);
+  target.panicle_pedicel_length_m.Save("panicle_pedicel_length_m", out);
 
   // Tillering.
   out << YAML::Key << "tiller_model_version" << YAML::Value << target.tiller_model_version;
@@ -1222,6 +1317,9 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   out << YAML::Key << "stem_material_roughness" << YAML::Value << target.stem_material_roughness;
   out << YAML::Key << "stem_material_metallic" << YAML::Value << target.stem_material_metallic;
   out << YAML::Key << "stem_material_specular" << YAML::Value << target.stem_material_specular;
+  out << YAML::Key << "panicle_immature_color" << YAML::Value << target.panicle_immature_color;
+  out << YAML::Key << "panicle_mature_color" << YAML::Value << target.panicle_mature_color;
+  out << YAML::Key << "panicle_material_roughness" << YAML::Value << target.panicle_material_roughness;
   out << YAML::Key << "culm_radial_segments" << YAML::Value << target.culm_radial_segments;
   out << YAML::Key << "culm_node_radius_scale" << YAML::Value << target.culm_node_radius_scale;
   out << YAML::Key << "culm_texture_repeat_m" << YAML::Value << target.culm_texture_repeat_m;
@@ -1296,6 +1394,25 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& leaf_blade_stage3_width_scale = target.leaf_blade_stage3_width_scale;
   auto& leaf_lifespan_years = target.leaf_lifespan_years;
   auto& leaf_wilting_years = target.leaf_wilting_years;
+  auto& flag_leaf_length_scale = target.flag_leaf_length_scale;
+  auto& flag_leaf_width_scale = target.flag_leaf_width_scale;
+  auto& flag_leaf_insertion_angle_offset = target.flag_leaf_insertion_angle_offset;
+  auto& flag_leaf_bending_scale = target.flag_leaf_bending_scale;
+  auto& enable_panicle = target.enable_panicle;
+  auto& panicle_initiation_gdd = target.panicle_initiation_gdd;
+  auto& panicle_maturity_gdd = target.panicle_maturity_gdd;
+  auto& panicle_peduncle_length_m = target.panicle_peduncle_length_m;
+  auto& panicle_rachis_length_m = target.panicle_rachis_length_m;
+  auto& panicle_rachis_radius_m = target.panicle_rachis_radius_m;
+  auto& panicle_primary_branch_count = target.panicle_primary_branch_count;
+  auto& panicle_spikelet_pairs_per_branch = target.panicle_spikelet_pairs_per_branch;
+  auto& panicle_branch_length_m = target.panicle_branch_length_m;
+  auto& panicle_branch_length_taper = target.panicle_branch_length_taper;
+  auto& panicle_branch_radius_m = target.panicle_branch_radius_m;
+  auto& panicle_branch_angle_degrees = target.panicle_branch_angle_degrees;
+  auto& panicle_spikelet_length_m = target.panicle_spikelet_length_m;
+  auto& panicle_spikelet_radius_m = target.panicle_spikelet_radius_m;
+  auto& panicle_pedicel_length_m = target.panicle_pedicel_length_m;
   auto& tiller_model_version = target.tiller_model_version;
   auto& tiller_count = target.tiller_count;
   auto& tiller_count_min = target.tiller_count_min;
@@ -1368,6 +1485,9 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& stem_material_roughness = target.stem_material_roughness;
   auto& stem_material_metallic = target.stem_material_metallic;
   auto& stem_material_specular = target.stem_material_specular;
+  auto& panicle_immature_color = target.panicle_immature_color;
+  auto& panicle_mature_color = target.panicle_mature_color;
+  auto& panicle_material_roughness = target.panicle_material_roughness;
   auto& culm_radial_segments = target.culm_radial_segments;
   auto& culm_node_radius_scale = target.culm_node_radius_scale;
   auto& culm_texture_repeat_m = target.culm_texture_repeat_m;
@@ -1451,6 +1571,28 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
 
   LoadSingleDistributionWithScalarFallback(in, "leaf_lifespan_years", leaf_lifespan_years);
   LoadSingleDistributionWithScalarFallback(in, "leaf_wilting_years", leaf_wilting_years);
+  LoadSingleDistributionWithScalarFallback(in, "flag_leaf_length_scale", flag_leaf_length_scale);
+  LoadSingleDistributionWithScalarFallback(in, "flag_leaf_width_scale", flag_leaf_width_scale);
+  LoadSingleDistributionWithScalarFallback(in, "flag_leaf_insertion_angle_offset", flag_leaf_insertion_angle_offset);
+  LoadSingleDistributionWithScalarFallback(in, "flag_leaf_bending_scale", flag_leaf_bending_scale);
+
+  if (in["enable_panicle"]) {
+    enable_panicle = in["enable_panicle"].as<bool>();
+  }
+  LoadSingleDistributionWithScalarFallback(in, "panicle_initiation_gdd", panicle_initiation_gdd);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_maturity_gdd", panicle_maturity_gdd);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_peduncle_length_m", panicle_peduncle_length_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_rachis_length_m", panicle_rachis_length_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_rachis_radius_m", panicle_rachis_radius_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_primary_branch_count", panicle_primary_branch_count);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_spikelet_pairs_per_branch", panicle_spikelet_pairs_per_branch);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_branch_length_m", panicle_branch_length_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_branch_length_taper", panicle_branch_length_taper);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_branch_radius_m", panicle_branch_radius_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_branch_angle_degrees", panicle_branch_angle_degrees);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_spikelet_length_m", panicle_spikelet_length_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_spikelet_radius_m", panicle_spikelet_radius_m);
+  LoadSingleDistributionWithScalarFallback(in, "panicle_pedicel_length_m", panicle_pedicel_length_m);
 
   if (!in["tiller_model_version"] || in["tiller_model_version"].as<uint32_t>() != 4u) {
     throw std::runtime_error("Sorghum descriptor requires tiller_model_version 4");
@@ -1573,6 +1715,12 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
     stem_material_metallic = in["stem_material_metallic"].as<float>();
   if (in["stem_material_specular"])
     stem_material_specular = in["stem_material_specular"].as<float>();
+  if (in["panicle_immature_color"])
+    panicle_immature_color = in["panicle_immature_color"].as<glm::vec3>();
+  if (in["panicle_mature_color"])
+    panicle_mature_color = in["panicle_mature_color"].as<glm::vec3>();
+  if (in["panicle_material_roughness"])
+    panicle_material_roughness = in["panicle_material_roughness"].as<float>();
   if (in["culm_radial_segments"])
     culm_radial_segments = in["culm_radial_segments"].as<uint32_t>();
   if (in["culm_node_radius_scale"])

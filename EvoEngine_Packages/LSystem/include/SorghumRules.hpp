@@ -90,6 +90,27 @@ struct SampledSorghumParams {
   // ===== Leaf lifecycle (chronological, mirrors ScotsPine) =====
   evo_engine::SingleDistribution<float> leaf_lifespan_years{2.5f};
   evo_engine::SingleDistribution<float> leaf_wilting_years{0.5f};
+  float flag_leaf_length_scale = 0.78f;
+  float flag_leaf_width_scale = 0.82f;
+  float flag_leaf_insertion_angle_offset = -12.0f;
+  float flag_leaf_bending_scale = 0.65f;
+
+  // ===== Reproductive panicle =====
+  bool enable_panicle = true;
+  float panicle_initiation_gdd = 1.0f;
+  float panicle_maturity_gdd = 260.0f;
+  float panicle_peduncle_length_m = 0.24f;
+  float panicle_rachis_length_m = 0.30f;
+  float panicle_rachis_radius_m = 0.006f;
+  int panicle_primary_branch_count = 18;
+  int panicle_spikelet_pairs_per_branch = 6;
+  float panicle_branch_length_m = 0.13f;
+  float panicle_branch_length_taper = 0.42f;
+  float panicle_branch_radius_m = 0.0022f;
+  float panicle_branch_angle_degrees = 32.0f;
+  float panicle_spikelet_length_m = 0.008f;
+  float panicle_spikelet_radius_m = 0.0036f;
+  float panicle_pedicel_length_m = 0.006f;
 
   // ===== Tillering =====
   int tiller_count = 4;

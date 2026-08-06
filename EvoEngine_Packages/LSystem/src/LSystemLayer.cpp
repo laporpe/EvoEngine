@@ -205,13 +205,13 @@ PineTemporalSample SamplePineTemporalParameters(ScotsPine& pine) {
 namespace {
 size_t PublishSorghumGeometry(const std::shared_ptr<Scene>& scene,
                               const std::vector<std::shared_ptr<SorghumLS>>& plants,
-                              const bool update_render_geometry) {
+                              const bool update_render_geometry, const bool incremental = false) {
   if (plants.empty()) {
     return 0;
   }
   std::vector<std::shared_ptr<const SorghumGeometrySnapshot>> snapshots(plants.size());
   Jobs::RunParallelFor(plants.size(), [&](const size_t index) {
-    snapshots[index] = plants[index]->GenerateGeometrySnapshot(true);
+    snapshots[index] = incremental ? plants[index]->AdvanceGeometrySnapshot(true) : plants[index]->GenerateGeometrySnapshot(true);
   });
   for (size_t index = 0; index < plants.size(); ++index) {
     plants[index]->PublishGeometrySnapshot(snapshots[index], update_render_geometry);
@@ -260,6 +260,34 @@ size_t LSystemLayer::RegenerateSorghumScene(const float evaluation_gdd, const in
     }
   }
   return PublishSorghumGeometry(scene, plants, update_render_geometry);
+}
+
+size_t LSystemLayer::AdvanceSorghumScene(const float evaluation_gdd, const int seed_base,
+                                         const bool update_render_geometry) const {
+  const auto scene = GetScene();
+  if (!scene) {
+    return 0;
+  }
+  std::vector<std::shared_ptr<SorghumLS>> plants;
+  uint32_t seed_offset = 0;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto plant = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      if (!plant || !plant->descriptor_ref.Get<SorghumLSDescriptor>()) {
+        continue;
+      }
+      if (seed_base >= 0) {
+        plant->seed = static_cast<uint32_t>(seed_base) + seed_offset;
+      }
+      plant->target_gdd = std::max(0.0f, evaluation_gdd);
+      plants.emplace_back(plant);
+      ++seed_offset;
+    }
+  }
+  return PublishSorghumGeometry(scene, plants, update_render_geometry, true);
 }
 
 size_t LSystemLayer::RestoreSorghumScene(const bool update_render_geometry) const {

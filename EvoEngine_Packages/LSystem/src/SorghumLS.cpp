@@ -101,6 +101,117 @@ glm::vec4 EvaluateInternodeGreenPalette(const int rank, const int max_rank, cons
   return glm::vec4(color, 1.0f);
 }
 
+glm::vec4 EvaluatePanicleColor(const SorghumLSDescriptor* descriptor, const float progress) {
+  const glm::vec3 immature = descriptor ? descriptor->panicle_immature_color : glm::vec3(0.32f, 0.56f, 0.16f);
+  const glm::vec3 mature = descriptor ? descriptor->panicle_mature_color : glm::vec3(0.48f, 0.16f, 0.07f);
+  return glm::vec4(glm::mix(immature, mature, std::clamp(progress, 0.0f, 1.0f)), 1.0f);
+}
+
+void AppendPanicleSegment(std::vector<Vertex>& vertices, std::vector<glm::uvec3>& triangles, const glm::vec3& start,
+                          const glm::vec3& end, const float start_radius, const float end_radius,
+                          const glm::vec4& color) {
+  const glm::vec3 delta = end - start;
+  const float length = glm::length(delta);
+  if (length <= 1.0e-6f) {
+    return;
+  }
+  constexpr uint32_t kSides = 6u;
+  const glm::vec3 direction = delta / length;
+  const glm::vec3 reference = std::abs(direction.y) > 0.95f ? glm::vec3(1.0f, 0.0f, 0.0f) : glm::vec3(0.0f, 1.0f, 0.0f);
+  const glm::vec3 right = glm::normalize(glm::cross(reference, direction));
+  const glm::vec3 up = glm::normalize(glm::cross(direction, right));
+  const uint32_t base = static_cast<uint32_t>(vertices.size());
+  for (uint32_t ring = 0; ring < 2u; ++ring) {
+    const float t = static_cast<float>(ring);
+    const glm::vec3 center = glm::mix(start, end, t);
+    const float radius = glm::mix(std::max(0.00005f, start_radius), std::max(0.00005f, end_radius), t);
+    for (uint32_t side = 0; side <= kSides; ++side) {
+      const float u = static_cast<float>(side) / static_cast<float>(kSides);
+      const float angle = glm::two_pi<float>() * u;
+      const glm::vec3 radial = right * std::cos(angle) + up * std::sin(angle);
+      Vertex vertex{};
+      vertex.position = center + radial * radius;
+      vertex.normal = radial;
+      vertex.tangent = glm::normalize(-right * std::sin(angle) + up * std::cos(angle));
+      vertex.color = color;
+      vertex.tex_coord = glm::vec2(u, t);
+      vertices.emplace_back(vertex);
+    }
+  }
+  const uint32_t stride = kSides + 1u;
+  for (uint32_t side = 0; side < kSides; ++side) {
+    const uint32_t a = base + side;
+    const uint32_t b = a + 1u;
+    const uint32_t c = a + stride;
+    const uint32_t d = c + 1u;
+    // The radial vertex normal points outwards.  Keep the geometric winding
+    // consistent with it so the one-sided OptiX material retains the visible
+    // exterior of the rachis, branches, and spikelets.  The former reversed
+    // winding made the native panicle mesh invisible from the exterior even
+    // though its L-system graph and metadata were complete.
+    triangles.emplace_back(a, b, c);
+    triangles.emplace_back(b, d, c);
+  }
+}
+
+void GeneratePanicleMesh(const SorghumGraph& graph, const SorghumLSDescriptor* descriptor,
+                         std::vector<Vertex>& vertices, std::vector<glm::uvec3>& triangles,
+                         std::vector<SorghumOrganGeometryRange>& ranges, uint32_t& branch_count,
+                         uint32_t& spikelet_count) {
+  vertices.clear();
+  triangles.clear();
+  branch_count = 0;
+  spikelet_count = 0;
+  for (const auto handle : graph.PeekSortedNodeList()) {
+    const auto& node = graph.PeekNode(handle);
+    const size_t vertex_start = vertices.size();
+    const size_t triangle_start = triangles.size();
+    SorghumOrganGeometryRange range;
+    range.node_id = static_cast<int>(node.GetIndex());
+    if (node.data.Is<SorghumPanicleRachis>()) {
+      const auto& rachis = node.data.Get<SorghumPanicleRachis>();
+      AppendPanicleSegment(vertices, triangles, node.info.global_position, node.info.GetGlobalEndPosition(),
+                           rachis.thickness * 0.5f, rachis.thickness * 0.38f,
+                           EvaluatePanicleColor(descriptor, rachis.growth_progress));
+      range.kind = SorghumOrganGeometryKind::PanicleRachis;
+    } else if (node.data.Is<SorghumPanicleBranch>()) {
+      const auto& branch = node.data.Get<SorghumPanicleBranch>();
+      AppendPanicleSegment(vertices, triangles, node.info.global_position, node.info.GetGlobalEndPosition(),
+                           branch.thickness * 0.5f, branch.thickness * 0.26f,
+                           EvaluatePanicleColor(descriptor, branch.growth_progress));
+      range.kind = SorghumOrganGeometryKind::PanicleBranch;
+      range.rank = branch.rank;
+      ++branch_count;
+    } else if (node.data.Is<SorghumPanicleSpikelet>()) {
+      const auto& spikelet = node.data.Get<SorghumPanicleSpikelet>();
+      const glm::vec3 start = node.info.global_position;
+      const glm::vec3 end = node.info.GetGlobalEndPosition();
+      const float total_length = spikelet.pedicel_length + spikelet.spikelet_length;
+      const float pedicel_fraction = total_length > 1.0e-6f ? spikelet.pedicel_length / total_length : 0.0f;
+      const glm::vec3 seed_start = glm::mix(start, end, pedicel_fraction);
+      const glm::vec3 seed_middle = glm::mix(seed_start, end, 0.62f);
+      const glm::vec4 color = EvaluatePanicleColor(descriptor, spikelet.growth_progress);
+      if (spikelet.pedicel_length > 1.0e-6f) {
+        AppendPanicleSegment(vertices, triangles, start, seed_start, spikelet.radius * 0.22f, spikelet.radius * 0.30f,
+                             color);
+      }
+      AppendPanicleSegment(vertices, triangles, seed_start, seed_middle, spikelet.radius * 0.40f, spikelet.radius,
+                           color);
+      AppendPanicleSegment(vertices, triangles, seed_middle, end, spikelet.radius, spikelet.radius * 0.16f, color);
+      range.kind = SorghumOrganGeometryKind::PanicleSpikelet;
+      range.rank = spikelet.branch_rank;
+      ++spikelet_count;
+    } else {
+      continue;
+    }
+    range.vertex_offset = static_cast<uint32_t>(vertex_start);
+    range.vertex_count = static_cast<uint32_t>(vertices.size() - vertex_start);
+    range.triangle_offset = static_cast<uint32_t>(triangle_start);
+    range.triangle_count = static_cast<uint32_t>(triangles.size() - triangle_start);
+    ranges.emplace_back(range);
+  }
+}
+
 void GenerateUnitCylinderMesh(std::vector<Vertex>& vertices, std::vector<unsigned int>& indices, int segments = 12) {
   vertices.clear();
   indices.clear();
@@ -368,6 +479,7 @@ bool HasSorghumGeometryChildren(const std::shared_ptr<Scene>& scene, const Entit
 
   bool has_internodes = false;
   bool has_leaves = false;
+  bool has_panicle = false;
   for (const auto& child : scene->GetChildren(owner)) {
     if (!scene->IsEntityValid(child)) {
       continue;
@@ -377,9 +489,11 @@ bool HasSorghumGeometryChildren(const std::shared_ptr<Scene>& scene, const Entit
       has_internodes = true;
     } else if (name == "Sorghum Leaves") {
       has_leaves = true;
+    } else if (name == "Sorghum Panicle") {
+      has_panicle = true;
     }
 
-    if (has_internodes && has_leaves) {
+    if (has_internodes && has_leaves && has_panicle) {
       return true;
     }
   }
@@ -435,6 +549,40 @@ std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::GenerateGeometrySnapsh
     growth_model.FinalizeSnapshotMorphology();
   }
   last_grow_seconds = GetApplication().GetTimes().Now() - grow_start;
+  return BuildGeometrySnapshot();
+}
+
+std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::AdvanceGeometrySnapshot(const bool uncapped_growth,
+                                                                                   const uint32_t max_growth_steps) {
+  const double grow_start = GetApplication().GetTimes().Now();
+  const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
+  if (!descriptor) {
+    last_grow_seconds = 0.0;
+    return {};
+  }
+
+  bool reinitialized = false;
+  if (!growth_model.IsInitialized()) {
+    growth_model.Initialize(*descriptor, seed);
+    reinitialized = true;
+  }
+  const float gdd_step = std::max(1.0e-5f, growth_model.gdd_per_growth_step);
+  if (target_gdd + gdd_step < growth_model.accumulated_gdd) {
+    growth_model.Initialize(*descriptor, seed);
+    reinitialized = true;
+  }
+
+  growth_model.GrowToGDD(target_gdd, uncapped_growth ? 0u : max_growth_steps);
+  if (descriptor->finalize_snapshot_morphology) {
+    growth_model.FinalizeSnapshotMorphology();
+  }
+  last_grow_seconds = GetApplication().GetTimes().Now() - grow_start;
+
+  // A sub-step GDD change has no new L-system state.  Preserve the existing
+  // snapshot so ordered animation capture can reuse its exact geometry.
+  if (!reinitialized && growth_model.last_growth_steps == 0 && geometry_snapshot_) {
+    return geometry_snapshot_;
+  }
   return BuildGeometrySnapshot();
 }
 
@@ -536,6 +684,8 @@ std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::BuildGeometrySnapshot(
   last_internode_count = 0;
   last_leaf_count = 0;
   last_live_leaf_count = 0;
+  last_panicle_branch_count = 0;
+  last_panicle_spikelet_count = 0;
   last_rebuild_internode_seconds = 0.0;
   last_leaf_spline_seconds = 0.0;
   last_leaf_mesh_seconds = 0.0;
@@ -561,6 +711,8 @@ std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::BuildGeometrySnapshot(
     snapshot->culm_triangles.reserve(geometry_snapshot_->culm_triangles.size());
     snapshot->leaf_vertices.reserve(geometry_snapshot_->leaf_vertices.size());
     snapshot->leaf_triangles.reserve(geometry_snapshot_->leaf_triangles.size());
+    snapshot->panicle_vertices.reserve(geometry_snapshot_->panicle_vertices.size());
+    snapshot->panicle_triangles.reserve(geometry_snapshot_->panicle_triangles.size());
     snapshot->organ_ranges.reserve(geometry_snapshot_->organ_ranges.size());
   }
   auto current_leaf_mesh_settings = leaf_mesh_settings;
@@ -726,10 +878,15 @@ std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::BuildGeometrySnapshot(
     }
   }
 
+  GeneratePanicleMesh(growth_model.graph, descriptor.get(), snapshot->panicle_vertices, snapshot->panicle_triangles,
+                      snapshot->organ_ranges, last_panicle_branch_count, last_panicle_spikelet_count);
+
   snapshot->node_count = last_node_count;
   snapshot->internode_count = last_internode_count;
   snapshot->leaf_count = last_leaf_count;
   snapshot->live_leaf_count = last_live_leaf_count;
+  snapshot->panicle_branch_count = last_panicle_branch_count;
+  snapshot->panicle_spikelet_count = last_panicle_spikelet_count;
   snapshot->invalid_instance_count = last_invalid_instance_count;
   last_rebuild_seconds = times.Now() - rebuild_start;
   return snapshot;
@@ -748,12 +905,15 @@ void SorghumLS::PublishGeometrySnapshot(const std::shared_ptr<const SorghumGeome
 
   Entity internode_entity;
   Entity leaf_entity;
+  Entity panicle_entity;
   for (const auto& child : scene->GetChildren(owner)) {
     const auto name = scene->GetEntityName(child);
     if (name == "Sorghum Internodes") {
       internode_entity = child;
     } else if (name == "Sorghum Leaves") {
       leaf_entity = child;
+    } else if (name == "Sorghum Panicle") {
+      panicle_entity = child;
     }
   }
 
@@ -874,6 +1034,36 @@ void SorghumLS::PublishGeometrySnapshot(const std::shared_ptr<const SorghumGeome
   attributes.tex_coord = true;
   leaf_mesh->SetVertices(attributes, snapshot->leaf_vertices, snapshot->leaf_triangles, update_render_geometry);
   last_mesh_upload_seconds = times.Now() - upload_start;
+
+  if (!scene->IsEntityValid(panicle_entity)) {
+    panicle_entity = scene->CreateEntity("Sorghum Panicle");
+    scene->SetParent(panicle_entity, owner);
+  }
+  scene->SetEntitySerializable(panicle_entity, false);
+  const auto panicle_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(panicle_entity).lock();
+  if (!panicle_renderer->mesh.Get<Mesh>()) {
+    panicle_renderer->mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+  }
+  if (!panicle_renderer->material.Get<Material>()) {
+    panicle_renderer->material = AssetManager::CreateTemporaryAsset<Material>();
+  }
+  if (const auto material = panicle_renderer->material.Get<Material>()) {
+    material->vertex_color_only = true;
+    material->material_properties.albedo_color = glm::vec3(1.0f);
+    material->material_properties.roughness = descriptor ? descriptor->panicle_material_roughness : 0.78f;
+    material->material_properties.metallic = 0.0f;
+    material->material_properties.specular = 0.35f;
+    material->material_properties.emission = 0.0f;
+  }
+  if (const auto mesh = panicle_renderer->mesh.Get<Mesh>()) {
+    // Panicles are a first-class part of the reproductive plant, not an
+    // editor-only overlay.  They must retain a BLAS so OptiX captures include
+    // the same rachis / branch / spikelet geometry that the L-system emits.
+    mesh->ray_tracing_acceleration_enabled = true;
+    mesh->compact_storage_on_update = false;
+    mesh->optimize_meshlet_layout = false;
+    mesh->SetVertices(attributes, snapshot->panicle_vertices, snapshot->panicle_triangles, update_render_geometry);
+  }
 
   geometry_snapshot_ = snapshot;
   last_rebuild_seconds += times.Now() - publish_start;
@@ -1074,6 +1264,8 @@ bool l_system_package::InspectSorghumLS(InspectorContext& context, SorghumLS& so
     ImGui::Text("Nodes: %u", last_node_count);
     ImGui::Text("Internodes: %u", last_internode_count);
     ImGui::Text("Leaves: %u (live %u)", last_leaf_count, last_live_leaf_count);
+    ImGui::Text("Panicle: %u branches, %u spikelets", sorghum.last_panicle_branch_count,
+                sorghum.last_panicle_spikelet_count);
   }
 
   return changed;

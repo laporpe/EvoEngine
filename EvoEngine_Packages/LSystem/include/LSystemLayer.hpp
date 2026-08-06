@@ -72,6 +72,7 @@ class LSystemLayer : public evo_engine::ILayer {
   void Update() override;
   void ExportProfileCsv(const std::string& path) const;
   size_t RegenerateSorghumScene(float evaluation_gdd, int seed_base = -1, bool update_render_geometry = true) const;
+  size_t AdvanceSorghumScene(float evaluation_gdd, int seed_base = -1, bool update_render_geometry = true) const;
   size_t RestoreSorghumScene(bool update_render_geometry = true) const;
 
  private:
