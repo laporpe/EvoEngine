@@ -117,6 +117,8 @@ struct LSystemLeafPhenotypeRecord {
   float target_blade_length_m = 0.0f;
   float blade_width_m = 0.0f;
   float target_blade_width_m = 0.0f;
+  float insertion_angle_degrees = 0.0f;
+  float target_insertion_angle_degrees = 0.0f;
   float collar_height_m = 0.0f;
   float tip_height_m = 0.0f;
   float maximum_height_m = 0.0f;
@@ -307,7 +309,20 @@ class PyDigitalAgriculture {
                                                 const std::filesystem::path& pawaga_descriptor_path,
                                                 bool regenerate_geometry = true, int seed_base = -1);
 
+  static size_t SetSorghumLsGenotypeDescriptors(
+      const std::map<std::string, std::filesystem::path>& descriptor_paths, bool regenerate_geometry = true,
+      int seed_base = -1);
+
   static size_t SetSorghumLsGridSpacing(float spacing_x, float spacing_z, const std::string& cultivar_filter = "");
+
+  static size_t ConfigureSorghumLsPlantingGrid(const std::vector<std::string>& row_genotypes, uint32_t columns,
+                                               float column_spacing_m = 0.76f, float row_spacing_m = 1.10f,
+                                               float center_x_m = 2.58f, float center_z_m = -7.51f);
+
+  static size_t ConfigureSorghumLsReplicatedSixByTenProfile(
+      const std::vector<std::string>& block_genotypes);
+
+  static size_t RemoveParbarContext();
 
   static size_t ConformSorghumLsPlantsToGroundMesh();
 

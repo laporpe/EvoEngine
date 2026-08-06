@@ -163,6 +163,62 @@ std::vector<Entity> CollectDescendants(const std::shared_ptr<Scene>& scene, cons
   return descendants;
 }
 
+std::string CultivarFromPlantName(const std::string& name);
+bool IsSorghumPlantingMarkerName(const std::string& name);
+
+std::vector<std::vector<glm::vec3>> CollectManualTwoByTenBlock(const std::shared_ptr<Scene>& scene,
+                                                               const std::string& cultivar) {
+  std::vector<glm::vec3> positions;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (scene->IsEntityValid(entity) && IsSorghumPlantingMarkerName(scene->GetEntityName(entity)) &&
+        CultivarFromPlantName(scene->GetEntityName(entity)) == cultivar) {
+      positions.emplace_back(scene->GetDataComponent<GlobalTransform>(entity).GetPosition());
+    }
+  }
+  if (positions.size() != 20) {
+    return {};
+  }
+  std::sort(positions.begin(), positions.end(), [](const glm::vec3& left, const glm::vec3& right) {
+    return left.z != right.z ? left.z > right.z : left.x < right.x;
+  });
+  std::vector<std::vector<glm::vec3>> rows(2);
+  rows[0] = {positions.begin(), positions.begin() + 10};
+  rows[1] = {positions.begin() + 10, positions.end()};
+  for (auto& row : rows) {
+    std::sort(row.begin(), row.end(), [](const glm::vec3& left, const glm::vec3& right) { return left.x < right.x; });
+    const auto [min_z, max_z] = std::minmax_element(row.begin(), row.end(), [](const glm::vec3& left,
+                                                                              const glm::vec3& right) {
+      return left.z < right.z;
+    });
+    if (max_z->z - min_z->z > 0.01f) {
+      return {};
+    }
+  }
+  return rows;
+}
+
+glm::vec3 MeanPosition(const std::vector<std::vector<glm::vec3>>& rows) {
+  glm::vec3 result(0.0f);
+  for (const auto& row : rows) {
+    for (const auto& position : row) {
+      result += position;
+    }
+  }
+  return result / 20.0f;
+}
+
+void RenameEntityHierarchyPrefix(const std::shared_ptr<Scene>& scene, const Entity& root,
+                                 const std::string& old_prefix, const std::string& new_prefix) {
+  auto entities = CollectDescendants(scene, root);
+  entities.insert(entities.begin(), root);
+  for (const auto& entity : entities) {
+    const std::string name = scene->GetEntityName(entity);
+    if (name.rfind(old_prefix, 0) == 0) {
+      scene->SetEntityName(entity, new_prefix + name.substr(old_prefix.size()));
+    }
+  }
+}
+
 Entity FindParbarMeshEntity(const std::shared_ptr<Scene>& scene, const ParbarPanel& panel) {
   Entity root = FindEntityByName(scene, panel.root);
   if (scene && !scene->IsEntityValid(root)) {
@@ -204,13 +260,9 @@ bool NameContains(const std::string& name, const std::string& token) {
 }
 
 std::string CultivarFromPlantName(const std::string& name) {
-  if (NameContains(name, "pawaga")) {
-    return "Pawaga";
-  }
-  if (NameContains(name, "btx")) {
-    return "BTX";
-  }
-  return {};
+  constexpr const char* marker = "_LSystem_";
+  const size_t marker_position = name.find(marker);
+  return marker_position == std::string::npos || marker_position == 0 ? std::string{} : name.substr(0, marker_position);
 }
 
 bool MatchesCultivarFilter(const std::string& cultivar, const std::string& filter) {
@@ -1061,6 +1113,8 @@ float MeasureCalibrationPlantHeight(const SorghumLS& sorghum,
       record.target_blade_length_m = leaf.target_blade_length;
       record.blade_width_m = leaf.blade_max_width;
       record.target_blade_width_m = leaf.target_blade_max_width;
+      record.insertion_angle_degrees = leaf.insertion_angle_deg;
+      record.target_insertion_angle_degrees = leaf.target_insertion_angle_deg;
       record.alive = leaf.alive;
       if (!BuildCalibrationStemContext(sorghum.growth_model.graph, handle, stem_context)) {
         if (leaf_records)
@@ -1364,8 +1418,16 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("regenerate_geometry") = true);
   m.def("SetSorghumLsCultivarDescriptors", &SetSorghumLsCultivarDescriptors, py::arg("btx_descriptor_path"),
         py::arg("pawaga_descriptor_path"), py::arg("regenerate_geometry") = true, py::arg("seed_base") = -1);
+  m.def("SetSorghumLsGenotypeDescriptors", &SetSorghumLsGenotypeDescriptors, py::arg("descriptor_paths"),
+        py::arg("regenerate_geometry") = true, py::arg("seed_base") = -1);
   m.def("SetSorghumLsGridSpacing", &SetSorghumLsGridSpacing, py::arg("spacing_x"), py::arg("spacing_z"),
         py::arg("cultivar_filter") = "");
+  m.def("ConfigureSorghumLsPlantingGrid", &ConfigureSorghumLsPlantingGrid, py::arg("row_genotypes"),
+        py::arg("columns"), py::arg("column_spacing_m") = 0.76f, py::arg("row_spacing_m") = 1.10f,
+        py::arg("center_x_m") = 2.58f, py::arg("center_z_m") = -7.51f);
+  m.def("ConfigureSorghumLsReplicatedSixByTenProfile", &ConfigureSorghumLsReplicatedSixByTenProfile,
+        py::arg("block_genotypes"));
+  m.def("RemoveParbarContext", &RemoveParbarContext);
   m.def("ConformSorghumLsPlantsToGroundMesh", &ConformSorghumLsPlantsToGroundMesh);
   m.def("RemoveSorghumLsPseudoTillerPlants", &RemoveSorghumLsPseudoTillerPlants);
   m.def("ConvertSorghumLsPlantsToPlantingMarkers", &ConvertSorghumLsPlantsToPlantingMarkers);
@@ -1472,6 +1534,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("target_blade_length_m", &LSystemLeafPhenotypeRecord::target_blade_length_m)
       .def_readonly("blade_width_m", &LSystemLeafPhenotypeRecord::blade_width_m)
       .def_readonly("target_blade_width_m", &LSystemLeafPhenotypeRecord::target_blade_width_m)
+      .def_readonly("insertion_angle_degrees", &LSystemLeafPhenotypeRecord::insertion_angle_degrees)
+      .def_readonly("target_insertion_angle_degrees", &LSystemLeafPhenotypeRecord::target_insertion_angle_degrees)
       .def_readonly("collar_height_m", &LSystemLeafPhenotypeRecord::collar_height_m)
       .def_readonly("tip_height_m", &LSystemLeafPhenotypeRecord::tip_height_m)
       .def_readonly("maximum_height_m", &LSystemLeafPhenotypeRecord::maximum_height_m)
@@ -2339,17 +2403,29 @@ size_t PyDigitalAgriculture::SetSorghumLsLeafWidthScale(const float leaf_width_s
 size_t PyDigitalAgriculture::SetSorghumLsCultivarDescriptors(const std::filesystem::path& btx_descriptor_path,
                                                              const std::filesystem::path& pawaga_descriptor_path,
                                                              const bool regenerate_geometry, const int seed_base) {
+  return SetSorghumLsGenotypeDescriptors({{"BTX", btx_descriptor_path}, {"Pawaga", pawaga_descriptor_path}},
+                                         regenerate_geometry, seed_base);
+}
+
+size_t PyDigitalAgriculture::SetSorghumLsGenotypeDescriptors(
+    const std::map<std::string, std::filesystem::path>& descriptor_paths, const bool regenerate_geometry,
+    const int seed_base) {
   const auto scene = ApplicationContext::Get().GetActiveScene();
-  if (!scene) {
+  if (!scene || descriptor_paths.empty()) {
     return 0;
   }
-  const auto btx_descriptor =
-      std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(btx_descriptor_path));
-  const auto pawaga_descriptor =
-      std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(pawaga_descriptor_path));
-  if (!btx_descriptor || !pawaga_descriptor) {
-    EVOENGINE_ERROR("SetSorghumLsCultivarDescriptors failed: missing calibrated descriptor asset")
-    return 0;
+  std::map<std::string, std::shared_ptr<SorghumLSDescriptor>> descriptors;
+  for (const auto& [genotype, path] : descriptor_paths) {
+    if (genotype.empty()) {
+      EVOENGINE_ERROR("SetSorghumLsGenotypeDescriptors failed: empty genotype name")
+      return 0;
+    }
+    const auto descriptor = std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(path));
+    if (!descriptor) {
+      EVOENGINE_ERROR("SetSorghumLsGenotypeDescriptors failed: missing descriptor asset for " + genotype)
+      return 0;
+    }
+    descriptors.emplace(genotype, descriptor);
   }
 
   size_t plant_count = 0;
@@ -2360,22 +2436,22 @@ size_t PyDigitalAgriculture::SetSorghumLsCultivarDescriptors(const std::filesyst
       if (!scene->IsEntityValid(entity)) {
         continue;
       }
-      const std::string cultivar = CultivarFromPlantName(scene->GetEntityName(entity));
-      const auto descriptor = cultivar == "BTX" ? btx_descriptor : cultivar == "Pawaga" ? pawaga_descriptor : nullptr;
-      if (!descriptor) {
+      const std::string genotype = CultivarFromPlantName(scene->GetEntityName(entity));
+      const auto descriptor_it = descriptors.find(genotype);
+      if (descriptor_it == descriptors.end()) {
         continue;
       }
       const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
       if (!sorghum) {
         continue;
       }
-      sorghum->descriptor_ref = descriptor;
+      sorghum->descriptor_ref = descriptor_it->second;
       if (seed_base >= 0) {
         sorghum->seed = static_cast<uint32_t>(seed_base) + reseed_index;
       }
       if (regenerate_geometry) {
         std::mt19937 rng(sorghum->seed);
-        sorghum->target_gdd = std::max(0.0f, SampleDistribution(descriptor->target_gdd, rng));
+        sorghum->target_gdd = std::max(0.0f, SampleDistribution(descriptor_it->second->target_gdd, rng));
         sorghum->GenerateGeometryEntities(true);
       }
       plant_count++;
@@ -2442,6 +2518,177 @@ size_t PyDigitalAgriculture::SetSorghumLsGridSpacing(const float spacing_x, cons
   }
   TransformGraph::CalculateTransformGraphs(scene);
   return targets.size();
+}
+
+size_t PyDigitalAgriculture::ConfigureSorghumLsPlantingGrid(const std::vector<std::string>& row_genotypes,
+                                                           const uint32_t columns, const float column_spacing_m,
+                                                           const float row_spacing_m, const float center_x_m,
+                                                           const float center_z_m) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || row_genotypes.empty() || columns == 0 || column_spacing_m <= 0.0f || row_spacing_m <= 0.0f) {
+    return 0;
+  }
+  if (std::any_of(row_genotypes.begin(), row_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    EVOENGINE_ERROR("ConfigureSorghumLsPlantingGrid: genotype names must be non-empty labels")
+    return 0;
+  }
+
+  std::vector<Entity> old_markers;
+  std::vector<Entity> old_parents;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    old_markers.emplace_back(entity);
+    const auto parent = scene->GetParent(entity);
+    if (scene->IsEntityValid(parent) && std::find(old_parents.begin(), old_parents.end(), parent) == old_parents.end()) {
+      old_parents.emplace_back(parent);
+    }
+  }
+  for (const auto& marker : old_markers) {
+    if (scene->IsEntityValid(marker)) {
+      scene->DeleteEntity(marker);
+    }
+  }
+  for (const auto& parent : old_parents) {
+    const std::string parent_name = scene->IsEntityValid(parent) ? scene->GetEntityName(parent) : std::string{};
+    if (scene->IsEntityValid(parent) && scene->GetChildren(parent).empty() &&
+        parent_name.size() >= 6 && parent_name.compare(parent_name.size() - 6, 6, "_Field") == 0) {
+      scene->DeleteEntity(parent);
+    }
+  }
+
+  Entity field_root = FindEntityByName(scene, "Sorghum2026_6x10_Field");
+  if (!scene->IsEntityValid(field_root)) {
+    field_root = scene->CreateEntity("Sorghum2026_6x10_Field");
+  }
+  const float center_row = 0.5f * static_cast<float>(row_genotypes.size() - 1);
+  const float center_column = 0.5f * static_cast<float>(columns - 1);
+  size_t marker_count = 0;
+  for (size_t row = 0; row < row_genotypes.size(); ++row) {
+    for (uint32_t column = 0; column < columns; ++column) {
+      const std::string name = row_genotypes[row] + "_LSystem_R" + std::to_string(row) + "_C" +
+                               std::to_string(column);
+      const Entity marker = scene->CreateEntity(name);
+      auto transform = scene->GetDataComponent<Transform>(marker);
+      transform.SetPosition(glm::vec3(center_x_m + (static_cast<float>(column) - center_column) * column_spacing_m,
+                                      0.0f,
+                                      center_z_m + (static_cast<float>(row) - center_row) * row_spacing_m));
+      scene->SetDataComponent(marker, transform);
+      scene->SetParent(marker, field_root);
+      ++marker_count;
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return marker_count;
+}
+
+size_t PyDigitalAgriculture::ConfigureSorghumLsReplicatedSixByTenProfile(
+    const std::vector<std::string>& block_genotypes) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || block_genotypes.size() != 3 ||
+      std::any_of(block_genotypes.begin(), block_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    return 0;
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  auto first_block = CollectManualTwoByTenBlock(scene, "BTX");
+  auto second_block = CollectManualTwoByTenBlock(scene, "Pawaga");
+  const Entity first_rig = FindEntityByName(scene, "PARBAR_BTX");
+  const Entity second_rig = FindEntityByName(scene, "PARBAR_Pawaga");
+  if (first_block.empty() || second_block.empty() || !scene->IsEntityValid(first_rig) ||
+      !scene->IsEntityValid(second_rig)) {
+    EVOENGINE_ERROR("ConfigureSorghumLsReplicatedSixByTenProfile requires the manual BTX/Pawaga 4x10 profile")
+    return 0;
+  }
+
+  const glm::vec3 block_offset = glm::vec3(MeanPosition(second_block) - MeanPosition(first_block)) *
+                                 glm::vec3(1.0f, 0.0f, 1.0f);
+  auto rig_prefab = AssetManager::CreateTemporaryAsset<Prefab>();
+  rig_prefab->FromEntity(second_rig);
+  const Entity third_rig = rig_prefab->ToEntity(scene);
+  auto third_rig_transform = scene->GetDataComponent<Transform>(third_rig);
+  third_rig_transform.SetPosition(third_rig_transform.GetPosition() + block_offset);
+  scene->SetDataComponent(third_rig, third_rig_transform);
+  RenameEntityHierarchyPrefix(scene, first_rig, "PARBAR_BTX", "PARBAR_" + block_genotypes[0]);
+  RenameEntityHierarchyPrefix(scene, second_rig, "PARBAR_Pawaga", "PARBAR_" + block_genotypes[1]);
+  RenameEntityHierarchyPrefix(scene, third_rig, "PARBAR_Pawaga", "PARBAR_" + block_genotypes[2]);
+
+  std::vector<Entity> old_markers;
+  std::vector<Entity> old_parents;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    old_markers.emplace_back(entity);
+    const auto parent = scene->GetParent(entity);
+    if (scene->IsEntityValid(parent) && std::find(old_parents.begin(), old_parents.end(), parent) == old_parents.end()) {
+      old_parents.emplace_back(parent);
+    }
+  }
+  for (const auto& marker : old_markers) {
+    scene->DeleteEntity(marker);
+  }
+  for (const auto& parent : old_parents) {
+    if (scene->IsEntityValid(parent) && scene->GetChildren(parent).empty()) {
+      scene->DeleteEntity(parent);
+    }
+  }
+
+  auto third_block = second_block;
+  for (auto& row : third_block) {
+    for (auto& position : row) {
+      position += block_offset;
+    }
+  }
+  const Entity field_root = scene->CreateEntity("Sorghum2026_6x10_Field");
+  const std::vector<std::vector<std::vector<glm::vec3>>> blocks = {first_block, second_block, third_block};
+  size_t marker_count = 0;
+  for (size_t block = 0; block < blocks.size(); ++block) {
+    for (size_t block_row = 0; block_row < blocks[block].size(); ++block_row) {
+      const size_t row = block * 2 + block_row;
+      for (size_t column = 0; column < blocks[block][block_row].size(); ++column) {
+        const Entity marker = scene->CreateEntity(block_genotypes[block] + "_LSystem_R" + std::to_string(row) +
+                                                  "_C" + std::to_string(column));
+        auto transform = scene->GetDataComponent<Transform>(marker);
+        transform.SetPosition(blocks[block][block_row][column]);
+        scene->SetDataComponent(marker, transform);
+        scene->SetParent(marker, field_root);
+        ++marker_count;
+      }
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return marker_count;
+}
+
+size_t PyDigitalAgriculture::RemoveParbarContext() {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  std::vector<Entity> roots;
+  size_t entity_count = 0;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || scene->GetEntityName(entity).rfind("PARBAR_", 0) != 0) {
+      continue;
+    }
+    ++entity_count;
+    const Entity parent = scene->GetParent(entity);
+    if (!scene->IsEntityValid(parent) || scene->GetEntityName(parent).rfind("PARBAR_", 0) != 0) {
+      roots.emplace_back(entity);
+    }
+  }
+  for (const auto& root : roots) {
+    if (scene->IsEntityValid(root)) {
+      scene->DeleteEntity(root);
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return entity_count;
 }
 
 size_t PyDigitalAgriculture::ConformSorghumLsPlantsToGroundMesh() {
@@ -2632,6 +2879,13 @@ std::vector<LSystemPlantSceneMetadataRecord> PyDigitalAgriculture::GetSorghumLsP
   if (measure_geometry) {
     for (const auto& panel : kParbarPanels) {
       if (IsMiddleParbarPanel(panel)) {
+        Entity root = FindEntityByName(scene, panel.root);
+        if (!scene->IsEntityValid(root)) {
+          root = FindEntityByName(scene, std::string(panel.root) + "_SensorRig");
+        }
+        if (!scene->IsEntityValid(root)) {
+          continue;
+        }
         middle_panel_elevations[panel.cultivar] =
             TopFaceElevation(CollectTopFaceTriangles(scene, FindParbarMeshEntity(scene, panel)));
       }

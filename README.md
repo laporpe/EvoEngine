@@ -77,6 +77,7 @@ For detailed setup, platform requirements, Linux commands, VSCode notes, and ins
 | Runtime packages | [docs/runtime-packages.md](docs/runtime-packages.md) |
 | Extending EvoEngine | [docs/extending-evoengine.md](docs/extending-evoengine.md) |
 | Python bindings | [docs/python-bindings.md](docs/python-bindings.md) |
+| 2026 sorghum 6x10 experiment | [docs/sorghum-2026-6x10.md](docs/sorghum-2026-6x10.md) |
 | Runtime package index | [EvoEngine_Packages/README.md](EvoEngine_Packages/README.md) |
 | Service index | [EvoEngine_Services/README.md](EvoEngine_Services/README.md) |
 

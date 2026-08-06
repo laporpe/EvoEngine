@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "asset": "leaf_anatomy_master_v2.png",
+  "asset_sha256": "2753202f12dde214b73e52cada548541bb2f3268f3d88b9b968df2ed8421301",
+  "ownership": "blender_presentation_only",
+  "generator": "OpenAI built-in image generation",
+  "generated_date": "2026-07-29",
+  "role": "photo-grounded albedo source only; not measured BRDF data",
+  "reference_images": [
+    {
+      "name": "Internode_Collar_Close_3385.png",
+      "role": "authoritative blade-collar-sheath anatomy and color reference",
+      "sha256": "f1fe04628ac702cbeef5f6b138be60f2b4f538b4a9dbe1d0bbaaaf00d3b16fad"
+    },
+    {
+      "name": "Tiller_attachment_3418.png",
+      "role": "authoritative sheath and tiller attachment reference",
+      "sha256": "8258c1de48ff89f66cfdec2d464a91ebca03655dff156a93de6d9484dd7697bf"
+    },
+    {
+      "name": "LeafTextureBetter_3415.png",
+      "role": "authoritative blade surface, venation, color, and damage reference",
+      "sha256": "0754750c86826803f7b1f85beae794f50de41549c0a5e1da56efd7ddfb78cebb"
+    },
+    {
+      "name": "LeafTextureClose_3404.png",
+      "role": "authoritative blade microtexture reference",
+      "sha256": "0e4c6373abacbf6ce300ff8bb4012fa3b3a3648048e43edb8351fde23a836ad2"
+    }
+  ],
+  "prompt_summary": "Orthographic de-lit continuous Sorghum bicolor anatomical strip: open overlapping sheath, pale wavy collar and short ligule, uninterrupted centered midrib and parallel venation into the blade; no auricles, shadows, highlights, background, or detached parts.",
+  "constraints": [
+    "The generated bitmap is an albedo synthesis source, not a scientific measurement.",
+    "Normal, height, roughness, AO, metallic, and thickness atlases are generated deterministically by code.",
+    "The source is used only by the Blender presentation pipeline unless separately validated for scientific promotion."
+  ]
+}
