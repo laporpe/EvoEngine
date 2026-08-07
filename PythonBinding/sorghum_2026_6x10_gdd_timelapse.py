@@ -12,11 +12,11 @@ import re
 import shutil
 import subprocess
 import sys
+from collections import Counter
 from pathlib import Path
 
-from sorghum_2026_6x10_data import EXPERIMENT_ID, ROW_GENOTYPES, repo_root_from_script
+from sorghum_2026_6x10_data import EXPERIMENT_ID, repo_root_from_script
 from sorghum_2026_6x10_scene import (
-    GENOTYPES,
     SEEDS,
     TEMPLATE_SCENE,
     configure_engine_imports,
@@ -31,6 +31,16 @@ FRAME_PATTERN = "field_%04d.png"
 DESCRIPTOR_SESSION = "MeasurementStage02"
 FIELD_LEAF_VERTICAL_SUBDIVISION_M = 0.04
 FIELD_LEAF_HORIZONTAL_SUBDIVISIONS = 3
+CULTIVARS = ("BTX", "Pawaga")
+# Preserve the real three 2x10 physical blocks.  The third block is a balanced
+# cultivar check: its two 10-plant rows are BTX then Pawaga.
+ROW_CULTIVARS = ("BTX", "BTX", "Pawaga", "Pawaga", "BTX", "Pawaga")
+PLOT_LAYOUT = (
+    {"plot": 1, "rows": (0, 1), "cultivars": ("BTX", "BTX")},
+    {"plot": 2, "rows": (2, 3), "cultivars": ("Pawaga", "Pawaga")},
+    {"plot": 3, "rows": (4, 5), "cultivars": ("BTX", "Pawaga")},
+)
+PLANTS_PER_CULTIVAR = 30
 TARGET_GDD_PATTERN = re.compile(
     r"(?m)^target_gdd:\s*\r?\n\s*mean:\s*([-+0-9.eE]+)\s*\r?\n\s*deviation:\s*([-+0-9.eE]+)"
 )
@@ -52,10 +62,10 @@ def requested_states(value: str | None, state_count: int) -> tuple[int, ...]:
 
 
 def descriptor_paths(project_root: Path) -> dict[str, Path]:
-    root = project_root / "Assets/GeneratedAssets/Experiments" / EXPERIMENT_ID / "Descriptors" / DESCRIPTOR_SESSION
-    paths = {genotype: root / f"{genotype}.sorghumls" for genotype in GENOTYPES}
+    root = project_root / "Assets/ManualAssets/Descriptors"
+    paths = {cultivar: root / f"{cultivar}.sorghumls" for cultivar in CULTIVARS}
     if any(not path.is_file() for path in paths.values()):
-        raise FileNotFoundError(f"missing {DESCRIPTOR_SESSION} 2026 descriptor asset")
+        raise FileNotFoundError("missing Pawaga or BTX reference descriptor asset")
     return paths
 
 
@@ -70,7 +80,7 @@ def shared_target_gdd(paths: dict[str, Path]) -> float:
             raise ValueError("the time-lapse requires a fixed target GDD for every 2026 plant")
         values.append(mean)
     if any(abs(value - values[0]) > 1.0e-6 for value in values[1:]):
-        raise ValueError(f"the three genotype descriptors have different target GDD values: {values}")
+        raise ValueError(f"the cultivar descriptors have different target GDD values: {values}")
     return values[0]
 
 
@@ -102,20 +112,24 @@ def valid_cached_state(path: Path, frame: Path, expected: dict[str, object]) -> 
 def validate_field(records: list[object], expected_gdd: float) -> None:
     if len(records) != 60 or any(not record.has_geometry for record in records):
         raise RuntimeError("expected a rendered 60-plant field")
-    expected_rows = {genotype: 20 for genotype in GENOTYPES}
-    observed = {genotype: sum(record.cultivar == genotype for record in records) for genotype in GENOTYPES}
-    if observed != expected_rows or any(abs(float(record.evaluation_gdd) - expected_gdd) > 1.0e-3 for record in records):
-        raise RuntimeError("field plants do not match the requested genotype/GDD state")
+    observed = Counter(str(record.cultivar) for record in records)
+    expected = Counter({cultivar: PLANTS_PER_CULTIVAR for cultivar in CULTIVARS})
+    if observed != expected or any(abs(float(record.evaluation_gdd) - expected_gdd) > 1.0e-3 for record in records):
+        raise RuntimeError("field plants do not match the requested cultivar/GDD state")
+    for record in records:
+        match = re.search(r"_LSystem_R([0-5])_C([0-9])$", str(record.name))
+        if not match or str(record.cultivar) != ROW_CULTIVARS[int(match.group(1))]:
+            raise RuntimeError(f"field row/cultivar assignment mismatch: {record.name}")
 
 
 def summarize_phenology(records: list[object]) -> dict[str, dict[str, float | int]]:
     """Return a compact, renderer-independent reproductive audit by genotype."""
     summary: dict[str, dict[str, float | int]] = {}
-    for genotype in GENOTYPES:
-        group = [record for record in records if record.cultivar == genotype]
-        if len(group) != 20:
-            raise RuntimeError(f"{genotype}: expected 20 plants in phenology audit")
-        summary[genotype] = {
+    for cultivar in CULTIVARS:
+        group = [record for record in records if record.cultivar == cultivar]
+        if len(group) != PLANTS_PER_CULTIVAR:
+            raise RuntimeError(f"{cultivar}: expected {PLANTS_PER_CULTIVAR} plants in phenology audit")
+        summary[cultivar] = {
             "plants": len(group),
             "panicle_emerged_plants": sum(bool(record.panicle_emerged) for record in group),
             "panicle_vertex_count": sum(int(record.panicle_vertex_count) for record in group),
@@ -133,6 +147,8 @@ def initialize_field(evo: object, args: argparse.Namespace, descriptors: dict[st
         raise RuntimeError(f"failed to load {TEMPLATE_SCENE}")
     if not evo.WaitForProjectIdle(args.max_wait_frames):
         raise RuntimeError("2026 marker scene did not become idle")
+    if int(evo.RelabelSorghumLsPlantingMarkersByRow(list(ROW_CULTIVARS))) != 60:
+        raise RuntimeError("failed to apply the Pawaga/BTX 6x10 planting plan")
     if int(evo.InstantiateSorghumLsPlantsFromPlantingMarkers()) != 60:
         raise RuntimeError("failed to instantiate the 60 SorghumLS planting markers")
     if int(evo.ConformSorghumLsPlantsToGroundMesh()) != 60:
@@ -141,14 +157,14 @@ def initialize_field(evo: object, args: argparse.Namespace, descriptors: dict[st
         genotype: path.relative_to(args.project_root / "Assets") for genotype, path in descriptors.items()
     }
     if int(evo.SetSorghumLsGenotypeDescriptors(asset_descriptors, False, -1)) != 60:
-        raise RuntimeError("failed to assign the three 2026 genotype descriptors")
+        raise RuntimeError("failed to assign the Pawaga and BTX descriptors")
     if int(
         evo.ConfigureSorghumLsLeafMeshQuality(
             FIELD_LEAF_VERTICAL_SUBDIVISION_M, FIELD_LEAF_HORIZONTAL_SUBDIVISIONS, False, True, False
         )
     ) != 60:
         raise RuntimeError("failed to apply the render-only SorghumLS field leaf LOD")
-    if int(evo.SetSorghumLsFinalizeSnapshotMorphology(False)) != len(GENOTYPES):
+    if int(evo.SetSorghumLsFinalizeSnapshotMorphology(False)) != len(CULTIVARS):
         raise RuntimeError("failed to disable static-snapshot finalization for the dynamic GDD timeline")
     if not evo.EnsureIlluminationSoilContext() or not evo.ValidateIlluminationContext():
         raise RuntimeError("the established 2026 soil/illumination context is invalid")
@@ -346,10 +362,10 @@ def run(args: argparse.Namespace) -> Path:
         report = {
             "schema_version": 1,
             "renderer": "EvoEngine_OptiX",
-            "basis": "Sorghum_6x10_2026 marker scene instantiated as 60 SorghumLS plants",
+            "basis": "Sorghum_6x10_2026 marker positions instantiated as 60 Pawaga/BTX SorghumLS plants",
             "experiment_id": EXPERIMENT_ID,
-            "layout": {"rows": 6, "columns": 10, "row_genotypes": list(ROW_GENOTYPES), "plants_per_genotype": 20},
-            "descriptor_session": DESCRIPTOR_SESSION,
+            "layout": {"rows": 6, "columns": 10, "row_cultivars": list(ROW_CULTIVARS), "plots": list(PLOT_LAYOUT), "plants_per_cultivar": PLANTS_PER_CULTIVAR},
+            "descriptor_session": "manual_reference_descriptors",
             "target_gdd": target_gdd,
             "timeline": {"state_count": args.state_count, "state_1_gdd": state_gdd(1, target_gdd), "state_1000_gdd": state_gdd(args.state_count, target_gdd)},
             "render": {"width": args.width, "height": args.height, "fps": args.fps, "samples": args.samples, "bounces": args.bounces, "fixed_midday_profile": DEFAULT_PROFILE.to_dict(), "camera": camera, "field_leaf_lod": {"vertical_subdivision_m": FIELD_LEAF_VERTICAL_SUBDIVISION_M, "horizontal_subdivisions": FIELD_LEAF_HORIZONTAL_SUBDIVISIONS, "bottom_face": False, "leaf_sheath": True}},

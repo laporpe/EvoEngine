@@ -342,6 +342,10 @@ class PyDigitalAgriculture {
                                                float column_spacing_m = 0.76f, float row_spacing_m = 1.10f,
                                                float center_x_m = 2.58f, float center_z_m = -7.51f);
 
+  // Keeps the measured marker coordinates and PARBAR context, but changes the
+  // cultivar prefix used when the markers are converted to SorghumLS plants.
+  static size_t RelabelSorghumLsPlantingMarkersByRow(const std::vector<std::string>& row_genotypes);
+
   static size_t ConfigureSorghumLsReplicatedSixByTenProfile(
       const std::vector<std::string>& block_genotypes);
 

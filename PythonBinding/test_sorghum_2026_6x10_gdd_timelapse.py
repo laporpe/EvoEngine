@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections import Counter
 import importlib.util
 import sys
 import unittest
@@ -25,6 +26,13 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         self.assertEqual((1, 500, 1000), TIMELAPSE.requested_states("1000,500,1,500", 1000))
         with self.assertRaises(ValueError):
             TIMELAPSE.requested_states("0,1000", 1000)
+
+    def test_pawaga_btx_layout_preserves_two_full_and_one_split_2x10_blocks(self) -> None:
+        self.assertEqual(("BTX", "Pawaga"), TIMELAPSE.CULTIVARS)
+        self.assertEqual(("BTX", "BTX", "Pawaga", "Pawaga", "BTX", "Pawaga"), TIMELAPSE.ROW_CULTIVARS)
+        self.assertEqual(Counter(TIMELAPSE.ROW_CULTIVARS), Counter({"BTX": 3, "Pawaga": 3}))
+        self.assertEqual(("BTX", "Pawaga"), TIMELAPSE.PLOT_LAYOUT[2]["cultivars"])
+        self.assertEqual(30, TIMELAPSE.PLANTS_PER_CULTIVAR)
 
 
 if __name__ == "__main__":

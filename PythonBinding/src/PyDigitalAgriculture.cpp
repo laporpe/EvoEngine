@@ -1448,6 +1448,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
   m.def("ConfigureSorghumLsPlantingGrid", &ConfigureSorghumLsPlantingGrid, py::arg("row_genotypes"),
         py::arg("columns"), py::arg("column_spacing_m") = 0.76f, py::arg("row_spacing_m") = 1.10f,
         py::arg("center_x_m") = 2.58f, py::arg("center_z_m") = -7.51f);
+  m.def("RelabelSorghumLsPlantingMarkersByRow", &RelabelSorghumLsPlantingMarkersByRow,
+        py::arg("row_genotypes"));
   m.def("ConfigureSorghumLsReplicatedSixByTenProfile", &ConfigureSorghumLsReplicatedSixByTenProfile,
         py::arg("block_genotypes"));
   m.def("RemoveParbarContext", &RemoveParbarContext);
@@ -2717,6 +2719,47 @@ size_t PyDigitalAgriculture::ConfigureSorghumLsPlantingGrid(const std::vector<st
   }
   TransformGraph::CalculateTransformGraphs(scene, false);
   return marker_count;
+}
+
+size_t PyDigitalAgriculture::RelabelSorghumLsPlantingMarkersByRow(
+    const std::vector<std::string>& row_genotypes) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || row_genotypes.empty() ||
+      std::any_of(row_genotypes.begin(), row_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    return 0;
+  }
+
+  struct MarkerCoordinate {
+    Entity entity;
+    uint32_t row = 0;
+    uint32_t column = 0;
+  };
+  std::vector<MarkerCoordinate> markers;
+  std::set<std::pair<uint32_t, uint32_t>> coordinates;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    uint32_t row = 0;
+    uint32_t column = 0;
+    if (!TryParseGridCoordinate(scene->GetEntityName(entity), row, column) || row >= row_genotypes.size() ||
+        !coordinates.emplace(row, column).second) {
+      EVOENGINE_ERROR("RelabelSorghumLsPlantingMarkersByRow requires unique in-range grid markers")
+      return 0;
+    }
+    markers.push_back({entity, row, column});
+  }
+  if (markers.empty()) {
+    return 0;
+  }
+
+  for (const auto& marker : markers) {
+    scene->SetEntityName(marker.entity, row_genotypes[marker.row] + "_LSystem_R" +
+                                           std::to_string(marker.row) + "_C" + std::to_string(marker.column));
+  }
+  return markers.size();
 }
 
 size_t PyDigitalAgriculture::ConfigureSorghumLsReplicatedSixByTenProfile(
