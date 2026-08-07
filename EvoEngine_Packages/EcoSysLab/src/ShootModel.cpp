@@ -54,11 +54,16 @@ void ShootModel::CreateOrgansForInternode(SkeletonNode<InternodeGrowthData>& int
 void ShootModel::RegisterVoxel(const glm::mat4& global_transform, ClimateModel& climate_model) {
   const auto& sorted_internode_list = shoot_skeleton_.PeekSortedNodeList();
   auto& environment_grid = climate_model.environment_grid;
+  size_t skipped_internode_count = 0;
   for (auto it = sorted_internode_list.rbegin(); it != sorted_internode_list.rend(); ++it) {
     const auto& internode = shoot_skeleton_.RefNode(*it);
     const auto& internode_info = internode.info;
     const float biomass = internode_info.thickness;
     const glm::vec3 world_position = global_transform * glm::vec4(internode_info.global_position, 1.0f);
+    if (!environment_grid.voxel_grid.IsValid(world_position)) {
+      skipped_internode_count++;
+      continue;
+    }
     environment_grid.AddShadowValue(world_position, internode.data.shadow_size);
     environment_grid.AddBiomass(world_position, biomass);
     if (internode.IsEndNode()) {
@@ -70,6 +75,10 @@ void ShootModel::RegisterVoxel(const glm::mat4& global_transform, ClimateModel& 
       environment_grid.AddNode(registration);
     }
   }
+  if (skipped_internode_count > 0)
+    EVOENGINE_WARNING("Skipped " + std::to_string(skipped_internode_count) +
+                      " internodes with invalid environment-grid positions for tree entity " +
+                      std::to_string(shoot_skeleton_.data.entity_index) + ".")
 }
 
 void ShootModel::HarvestFruits(const std::function<bool(const ShootOrgan& fruit)>& harvest_function) {
@@ -247,6 +256,8 @@ Vigor ShootModel::SampleShootFlux(const glm::mat4& global_transform, const Clima
   auto& shoot_data = shoot_skeleton_.data;
   shoot_data.max_marker_count = 0;
   const auto& sorted_internode_list = shoot_skeleton_.PeekSortedNodeList();
+  size_t non_finite_position_count = 0;
+  size_t outside_environment_count = 0;
   if (tree_growth_settings.use_space_colonization) {
     if (tree_growth_settings.space_colonization_auto_resize) {
       auto min_bound = shoot_skeleton_.data.desired_min;
@@ -319,15 +330,39 @@ Vigor ShootModel::SampleShootFlux(const glm::mat4& global_transform, const Clima
       }
     }
     const glm::vec3 position = global_transform * glm::vec4(internode_info.global_position, 1.0f);
+    const bool finite_position =
+        std::isfinite(position.x) && std::isfinite(position.y) && std::isfinite(position.z);
+    const bool position_in_environment = finite_position && climate_model.environment_grid.voxel_grid.IsValid(position);
+    if (!finite_position)
+      non_finite_position_count++;
     if (sample_light_intensity) {
-      internode_data.light_intake =
-          glm::clamp(climate_model.environment_grid.Sample(position, internode_data.light_direction), 0.f, 1.f);
-      if (internode_data.light_intake <= glm::epsilon<float>()) {
+      if (finite_position) {
+        internode_data.light_intake =
+            glm::clamp(climate_model.environment_grid.Sample(position, internode_data.light_direction), 0.f, 1.f);
+      } else {
+        internode_data.light_intake = 0.0f;
+        internode_data.light_direction = glm::vec3(0.0f, 1.0f, 0.0f);
+      }
+      if (finite_position && internode_data.light_intake <= glm::epsilon<float>()) {
         internode_data.light_direction = glm::normalize(internode_info.GetGlobalDirection());
       }
     }
-    internode_data.space_occupancy = climate_model.environment_grid.voxel_grid.Peek(position).total_biomass;
+    if (position_in_environment) {
+      internode_data.space_occupancy = climate_model.environment_grid.voxel_grid.Peek(position).total_biomass;
+    } else {
+      internode_data.space_occupancy = 0.0f;
+      if (finite_position)
+        outside_environment_count++;
+    }
   }
+  if (non_finite_position_count > 0)
+    EVOENGINE_WARNING("Found " + std::to_string(non_finite_position_count) +
+                      " internodes with non-finite positions while sampling tree entity " +
+                      std::to_string(shoot_skeleton_.data.entity_index) + ".")
+  if (outside_environment_count > 0)
+    EVOENGINE_WARNING("Sampled " + std::to_string(outside_environment_count) +
+                      " internodes outside the environment grid for tree entity " +
+                      std::to_string(shoot_skeleton_.data.entity_index) + ".")
   for (auto it = sorted_internode_list.rbegin(); it != sorted_internode_list.rend(); ++it) {
     auto& internode = shoot_skeleton_.RefNode(*it);
     auto& internode_data = internode.data;

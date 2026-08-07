@@ -27,6 +27,7 @@ add_executable(EvoEngine_Tests
 	Core/SerializationRegistryTest.cpp
 	Core/LSystemLeafAtlasUvTest.cpp
 	Core/SunLightSamplingTest.cpp
+	Core/SorghumFractionalCoverTest.cpp
 	Rendering/RenderDemoPythonApiTest.cpp
 	${CMAKE_SOURCE_DIR}/EvoEngine_App/src/LauncherUtils.cpp
 	)
@@ -35,6 +36,7 @@ target_link_libraries(EvoEngine_Tests
 	EvoEngine_SDK
 	EvoEngine_DemoScene
 	LSystemPackage
+	DatasetGenerationPackage
 	GTest::gtest_main
 	)
 target_include_directories(EvoEngine_Tests
@@ -57,6 +59,8 @@ evoengine_copy_resources(EvoEngine_Tests "$<TARGET_FILE_DIR:EvoEngine_Tests>")
 add_custom_command(TARGET EvoEngine_Tests POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different
 		$<TARGET_FILE:LSystemPackage> $<TARGET_FILE_DIR:EvoEngine_Tests>
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		$<TARGET_FILE:DatasetGenerationPackage> $<TARGET_FILE_DIR:EvoEngine_Tests>
 	VERBATIM)
 set_property(TARGET EvoEngine_Tests PROPERTY FOLDER Tests)
 
@@ -133,6 +137,11 @@ gtest_discover_tests(EvoEngine_Tests
 	WORKING_DIRECTORY "$<TARGET_FILE_DIR:EvoEngine_Tests>"
 	TEST_FILTER SunLightSampling.*
 	PROPERTIES LABELS "render,cuda"
+	)
+gtest_discover_tests(EvoEngine_Tests
+	WORKING_DIRECTORY "$<TARGET_FILE_DIR:EvoEngine_Tests>"
+	TEST_FILTER SorghumFractionalCover.*
+	PROPERTIES LABELS "dataset-generation,sorghum"
 	)
 gtest_discover_tests(EvoEngine_Tests
 	WORKING_DIRECTORY "$<TARGET_FILE_DIR:EvoEngine_Tests>"

@@ -68,6 +68,9 @@ class DsBoxCollider : public IDsCollider {
   };
 
   glm::vec3 scale = glm::vec3(0.51f);
+  bool affect_tree_growth = false;
+  float tree_growth_shadow = 1.0f;
+  float tree_growth_biomass = 1.0f;
 
   float softness = 1.f;
   float friction = 1.0f;

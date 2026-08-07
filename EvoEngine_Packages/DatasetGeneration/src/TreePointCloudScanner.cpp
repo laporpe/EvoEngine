@@ -7,8 +7,34 @@
 #include "PointCloud.hpp"
 #include "Soil.hpp"
 #include "Tinyply.hpp"
+#include <cctype>
 using namespace eco_sys_lab_package;
 using namespace dataset_generation_package;
+
+namespace {
+bool IsBranchMeshName(const std::string& name) {
+  return name == "Branch Mesh" || name == "Shoot Branch Mesh" || name == "Root Branch Mesh" ||
+         name == "Strand Model Branch Mesh";
+}
+
+bool IsFinite(const glm::vec3& value) {
+  return std::isfinite(value.x) && std::isfinite(value.y) && std::isfinite(value.z);
+}
+
+Handle GetStablePointCloudId(const std::string& entity_name, const Handle fallback) {
+  if (entity_name.size() < 4 || entity_name[0] != 'I' || entity_name[1] != 'D') {
+    return fallback;
+  }
+  int id = 0;
+  size_t index = 2;
+  while (index < entity_name.size() && std::isdigit(static_cast<unsigned char>(entity_name[index]))) {
+    id = id * 10 + entity_name[index] - '0';
+    index++;
+  }
+  return index > 2 && id > 0 ? static_cast<Handle>(id) : fallback;
+}
+}  // namespace
+
 #pragma region Settings
 void TreePointCloudPointSettings::DrawGui() {
   ImGui::DragFloat("Point variance", &variance, 0.01f);
@@ -20,6 +46,7 @@ void TreePointCloudPointSettings::DrawGui() {
   ImGui::Checkbox("Tree Part Index", &tree_part_index);
   ImGui::Checkbox("Line Index", &line_index);
   ImGui::Checkbox("Internode Index", &internode_index);
+  ImGui::Checkbox("Capture Ground", &capture_ground);
 }
 
 void TreePointCloudPointSettings::Save(const std::string& name, YAML::Emitter& out) const {
@@ -32,6 +59,7 @@ void TreePointCloudPointSettings::Save(const std::string& name, YAML::Emitter& o
   out << YAML::Key << "tree_part_index" << YAML::Value << tree_part_index;
   out << YAML::Key << "line_index" << YAML::Value << line_index;
   out << YAML::Key << "internode_index" << YAML::Value << internode_index;
+  out << YAML::Key << "capture_ground" << YAML::Value << capture_ground;
   out << YAML::Key << "bounding_box_limit" << YAML::Value << bounding_box_limit;
   out << YAML::EndMap;
 }
@@ -55,6 +83,8 @@ void TreePointCloudPointSettings::Load(const std::string& name, const YAML::Node
       line_index = cd["line_index"].as<bool>();
     if (cd["internode_index"])
       internode_index = cd["internode_index"].as<bool>();
+    if (cd["capture_ground"])
+      capture_ground = cd["capture_ground"].as<bool>();
     if (cd["bounding_box_limit"])
       bounding_box_limit = cd["bounding_box_limit"].as<float>();
   }
@@ -159,9 +189,9 @@ void TreePointCloudCircularCaptureSettings::GenerateSamples(std::vector<PointClo
         const float x = static_cast<float>(i % scan_resolution);
         const float y = static_cast<float>(i / scan_resolution);
         const float x_angle = (x - scan_resolution / 2.0f + glm::linearRand(-0.5f, 0.5f)) /
-                              static_cast<float>(scan_resolution) * camera_fov / 2.0f;
+                              static_cast<float>(scan_resolution) * camera_fov;
         const float y_angle = (y - scan_resolution / 2.0f + glm::linearRand(-0.5f, 0.5f)) /
-                              static_cast<float>(scan_resolution) * camera_fov / 2.0f;
+                              static_cast<float>(scan_resolution) * camera_fov;
         auto& sample = point_cloud_samples[counter * scan_resolution * scan_resolution + i];
         sample.direction =
             glm::normalize(glm::rotate(glm::rotate(front, glm::radians(x_angle), left), glm::radians(y_angle), up));
@@ -170,6 +200,75 @@ void TreePointCloudCircularCaptureSettings::GenerateSamples(std::vector<PointClo
       counter++;
     }
   }
+}
+
+bool TreePointCloudSphericalCaptureSettings::DrawGui() {
+  bool changed = ImGui::DragFloat3("Scanner position", &scanner_position.x, 0.01f);
+  changed |= ImGui::DragFloat2("Horizontal angle start/end", &horizontal_angle_start, 0.1f);
+  changed |= ImGui::DragFloat2("Vertical angle start/end", &vertical_angle_start, 0.1f);
+  changed |= ImGui::DragFloat("Angular step", &angular_step, 0.001f, 0.001f, 180.0f);
+  changed |= ImGui::DragFloat("Max depth", &max_capture_depth, 0.1f, 0.0f);
+  return changed;
+}
+
+void TreePointCloudSphericalCaptureSettings::Save(const std::string& name, YAML::Emitter& out) const {
+  out << YAML::Key << name << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "scanner_position" << YAML::Value << scanner_position;
+  out << YAML::Key << "horizontal_angle_start" << YAML::Value << horizontal_angle_start;
+  out << YAML::Key << "horizontal_angle_end" << YAML::Value << horizontal_angle_end;
+  out << YAML::Key << "vertical_angle_start" << YAML::Value << vertical_angle_start;
+  out << YAML::Key << "vertical_angle_end" << YAML::Value << vertical_angle_end;
+  out << YAML::Key << "angular_step" << YAML::Value << angular_step;
+  out << YAML::Key << "max_capture_depth" << YAML::Value << max_capture_depth;
+  out << YAML::EndMap;
+}
+
+void TreePointCloudSphericalCaptureSettings::Load(const std::string& name, const YAML::Node& in) {
+  if (!in[name])
+    return;
+  const auto& settings = in[name];
+  if (settings["scanner_position"])
+    scanner_position = settings["scanner_position"].as<glm::vec3>();
+  if (settings["horizontal_angle_start"])
+    horizontal_angle_start = settings["horizontal_angle_start"].as<float>();
+  if (settings["horizontal_angle_end"])
+    horizontal_angle_end = settings["horizontal_angle_end"].as<float>();
+  if (settings["vertical_angle_start"])
+    vertical_angle_start = settings["vertical_angle_start"].as<float>();
+  if (settings["vertical_angle_end"])
+    vertical_angle_end = settings["vertical_angle_end"].as<float>();
+  if (settings["angular_step"])
+    angular_step = settings["angular_step"].as<float>();
+  if (settings["max_capture_depth"])
+    max_capture_depth = settings["max_capture_depth"].as<float>();
+}
+
+void TreePointCloudSphericalCaptureSettings::GenerateSamples(std::vector<PointCloudSample>& point_cloud_samples) {
+  if (angular_step <= 0.0f || horizontal_angle_end <= horizontal_angle_start ||
+      vertical_angle_end <= vertical_angle_start) {
+    point_cloud_samples.clear();
+    return;
+  }
+  const auto horizontal_sample_count =
+      static_cast<size_t>(glm::ceil((horizontal_angle_end - horizontal_angle_start) / angular_step));
+  const auto vertical_sample_count =
+      static_cast<size_t>(glm::ceil((vertical_angle_end - vertical_angle_start) / angular_step));
+  point_cloud_samples.resize(horizontal_sample_count * vertical_sample_count);
+  Jobs::RunParallelFor(point_cloud_samples.size(), [&](const size_t sample_index) {
+    const auto horizontal_index = sample_index % horizontal_sample_count;
+    const auto vertical_index = sample_index / horizontal_sample_count;
+    const float azimuth = glm::radians(horizontal_angle_start + (horizontal_index + 0.5f) * angular_step);
+    const float elevation = glm::radians(vertical_angle_start + (vertical_index + 0.5f) * angular_step);
+    const float horizontal_scale = glm::cos(elevation);
+    auto& sample = point_cloud_samples[sample_index];
+    sample.start = scanner_position;
+    sample.direction = {horizontal_scale * glm::sin(azimuth), glm::sin(elevation),
+                        horizontal_scale * glm::cos(azimuth)};
+  });
+}
+
+bool TreePointCloudSphericalCaptureSettings::SampleFilter(const PointCloudSample& sample) {
+  return glm::distance(sample.start, sample.hit_info.position) <= max_capture_depth;
 }
 
 bool TreePointCloudGridCaptureSettings::DrawGui() {
@@ -286,7 +385,8 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
     EVOENGINE_ERROR("No soil!");
     return;
   }
-  std::unordered_map<Handle, Handle> branch_mesh_renderer_handles, foliage_mesh_renderer_handles;
+  std::unordered_map<Handle, Handle> branch_mesh_renderer_handles, foliage_mesh_renderer_handles,
+      artificial_mesh_renderer_handles;
   Bound plant_bound{};
   auto scene = GetScene();
   const std::vector<Entity>* tree_entities = scene->UnsafeGetPrivateComponentOwnersList<Tree>();
@@ -296,14 +396,15 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
   }
   for (const auto& tree_entity : *tree_entities) {
     if (scene->IsEntityValid(tree_entity)) {
+      const auto tree_point_cloud_id = GetStablePointCloudId(scene->GetEntityName(tree_entity), tree_entity.GetIndex());
       // auto tree = scene->GetOrSetPrivateComponent<Tree>(treeEntity).lock();
       // auto copyPath = savePath;
       // tree->ExportTreeParts(ecoSysLabLayer->meshGeneratorSettings, copyPath.replace_extension(".yml"));
 
       scene->ForEachChild(tree_entity, [&](Entity child) {
-        if (scene->GetEntityName(child) == "Branch Mesh" && scene->HasPrivateComponent<MeshRenderer>(child)) {
+        if (IsBranchMeshName(scene->GetEntityName(child)) && scene->HasPrivateComponent<MeshRenderer>(child)) {
           const auto branch_mesh_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(child).lock();
-          branch_mesh_renderer_handles.insert({branch_mesh_renderer->GetHandle(), tree_entity.GetIndex()});
+          branch_mesh_renderer_handles.insert({branch_mesh_renderer->GetHandle(), tree_point_cloud_id});
 
           const auto global_transform = scene->GetDataComponent<GlobalTransform>(child);
           const auto mesh = branch_mesh_renderer->mesh.Get<Mesh>();
@@ -313,7 +414,17 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
               glm::max(plant_bound.max, glm::vec3(global_transform.value * glm::vec4(mesh->GetBound().max, 1.0f)));
         } else if (scene->GetEntityName(child) == "Foliage Mesh" && scene->HasPrivateComponent<Particles>(child)) {
           const auto foliage_mesh_renderer = scene->GetOrSetPrivateComponent<Particles>(child).lock();
-          foliage_mesh_renderer_handles.insert({foliage_mesh_renderer->GetHandle(), tree_entity.GetIndex()});
+          foliage_mesh_renderer_handles.insert({foliage_mesh_renderer->GetHandle(), tree_point_cloud_id});
+
+          const auto global_transform = scene->GetDataComponent<GlobalTransform>(child);
+          const auto mesh = foliage_mesh_renderer->mesh.Get<Mesh>();
+          plant_bound.min =
+              glm::min(plant_bound.min, glm::vec3(global_transform.value * glm::vec4(mesh->GetBound().min, 1.0f)));
+          plant_bound.max =
+              glm::max(plant_bound.max, glm::vec3(global_transform.value * glm::vec4(mesh->GetBound().max, 1.0f)));
+        } else if (scene->GetEntityName(child) == "Foliage Mesh" && scene->HasPrivateComponent<MeshRenderer>(child)) {
+          const auto foliage_mesh_renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(child).lock();
+          foliage_mesh_renderer_handles.insert({foliage_mesh_renderer->GetHandle(), tree_point_cloud_id});
 
           const auto global_transform = scene->GetDataComponent<GlobalTransform>(child);
           const auto mesh = foliage_mesh_renderer->mesh.Get<Mesh>();
@@ -324,7 +435,7 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
         } else if (scene->GetEntityName(child) == "Twig Strands" &&
                    scene->HasPrivateComponent<StrandsRenderer>(child)) {
           const auto twig_strands_renderer = scene->GetOrSetPrivateComponent<StrandsRenderer>(child).lock();
-          branch_mesh_renderer_handles.insert({twig_strands_renderer->GetHandle(), tree_entity.GetIndex()});
+          branch_mesh_renderer_handles.insert({twig_strands_renderer->GetHandle(), tree_point_cloud_id});
 
           const auto global_transform = scene->GetDataComponent<GlobalTransform>(child);
           const auto strands = twig_strands_renderer->strands.Get<Strands>();
@@ -344,26 +455,26 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
       }
     });
   }
+  if (const auto mesh_renderer_entities = scene->UnsafeGetPrivateComponentOwnersList<MeshRenderer>()) {
+    for (const auto& entity : *mesh_renderer_entities) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto object_id = GetStablePointCloudId(scene->GetEntityName(entity), 0);
+      if (object_id >= 1001) {
+        const auto renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(entity).lock();
+        artificial_mesh_renderer_handles.insert({renderer->GetHandle(), object_id});
+      }
+    }
+  }
 
   std::vector<PointCloudSample> pc_samples;
   capture_settings->GenerateSamples(pc_samples);
   switch (capture_settings->capture_mode) {
     case PointCloudCaptureSettings::CaptureMode::Cpu: {
-      /**
-       * You may take a look at render instances, to see what it contains. RenderLayer will prepare a RenderInstance
-       * every frame that contains all needed information for rendering everything for current scene. It's used in
-       * rasterization rendering, and here we also use it for ray tracing. It also detects updates of the scene, like
-       * transformation, mesh, material changes.
-       */
-      std::shared_ptr<RenderInstanceStorage> render_instances{};
-      if (render_layer) {
-        render_instances = render_layer->GetCurrentRenderInstanceStorage();
-      }
-      if (!render_instances) {
-        render_instances = std::make_shared<RenderInstanceStorage>();
-        Bound world_bound;
-        render_instances->BuildFromScene({}, ApplicationContext::Get().GetActiveScene(), world_bound);
-      }
+      std::shared_ptr<RenderInstanceStorage> render_instances = std::make_shared<RenderInstanceStorage>();
+      Bound world_bound;
+      render_instances->BuildFromScene({}, ApplicationContext::Get().GetActiveScene(), world_bound);
       CpuRayTracer cpu_ray_tracer;
       /**
        * During this step, the cpu_ray_tracer will scan all MeshRendereres in the scene, and establish TLAS and BLAS
@@ -398,13 +509,27 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
       continue;
     if (!capture_settings->SampleFilter(sample))
       continue;
-    auto& position = sample.hit_info.position;
-    if (position.x < (plant_bound.min.x - point_settings.bounding_box_limit) ||
+    auto branch_search = branch_mesh_renderer_handles.find(sample.handle);
+    auto foliage_search = foliage_mesh_renderer_handles.find(sample.handle);
+    auto artificial_search = artificial_mesh_renderer_handles.find(sample.handle);
+    const bool tree_hit =
+        branch_search != branch_mesh_renderer_handles.end() || foliage_search != foliage_mesh_renderer_handles.end();
+    const bool ground_hit = sample.handle == ground_mesh_renderer_handle;
+    const bool artificial_hit = artificial_search != artificial_mesh_renderer_handles.end();
+    if (!tree_hit && !ground_hit && !artificial_hit)
+      continue;
+    if (ground_hit && !point_settings.capture_ground)
+      continue;
+
+    const auto& position = sample.hit_info.position;
+    if (!IsFinite(position))
+      continue;
+    if (tree_hit && (position.x < (plant_bound.min.x - point_settings.bounding_box_limit) ||
         position.y < (plant_bound.min.y - point_settings.bounding_box_limit) ||
         position.z < (plant_bound.min.z - point_settings.bounding_box_limit) ||
         position.x > (plant_bound.max.x + point_settings.bounding_box_limit) ||
         position.y > (plant_bound.max.y + point_settings.bounding_box_limit) ||
-        position.z > (plant_bound.max.z + point_settings.bounding_box_limit))
+        position.z > (plant_bound.max.z + point_settings.bounding_box_limit)))
       continue;
     auto ball_rand = glm::vec3(0.0f);
     if (point_settings.ball_rand_radius > 0.0f) {
@@ -432,15 +557,15 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
     if (point_settings.tree_part_type_index) {
       tree_part_type_index.emplace_back(static_cast<int>(sample.hit_info.vertex_info4.y + 0.1f));
     }
-    auto branch_search = branch_mesh_renderer_handles.find(sample.handle);
-    auto foliage_search = foliage_mesh_renderer_handles.find(sample.handle);
     if (point_settings.instance_index) {
       if (branch_search != branch_mesh_renderer_handles.end()) {
         instance_index.emplace_back(static_cast<int>(branch_search->second));
       } else if (foliage_search != foliage_mesh_renderer_handles.end()) {
         instance_index.emplace_back(static_cast<int>(foliage_search->second));
+      } else if (artificial_search != artificial_mesh_renderer_handles.end()) {
+        instance_index.emplace_back(static_cast<int>(artificial_search->second));
       } else {
-        instance_index.emplace_back(0);
+        instance_index.emplace_back(1000);
       }
     }
 
@@ -451,6 +576,8 @@ void TreePointCloudScanner::Capture(const TreeMeshGeneratorSettings& mesh_genera
         type_index.emplace_back(1);
       } else if (sample.handle == ground_mesh_renderer_handle) {
         type_index.emplace_back(2);
+      } else if (artificial_search != artificial_mesh_renderer_handles.end()) {
+        type_index.emplace_back(3);
       } else {
         type_index.emplace_back(-1);
       }

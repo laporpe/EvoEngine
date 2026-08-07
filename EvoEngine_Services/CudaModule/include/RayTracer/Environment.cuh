@@ -176,7 +176,6 @@ static __forceinline__ __device__ glm::vec3 CalculateEnvironmentalLight(const gl
       environmentalLightColor = glm::vec3(environment.color * environment.skylight_intensity);
       break;
   }
-  environmentalLightColor = pow(environmentalLightColor, glm::vec3(1.0f / environment.gamma));
   return glm::max(glm::vec3(0.0f), environmentalLightColor);
 }
 

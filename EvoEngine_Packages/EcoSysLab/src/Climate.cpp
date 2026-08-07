@@ -2,6 +2,7 @@
 #include "EcoSysLabSerializationAdapters.hpp"
 
 #include "AssetManager.hpp"
+#include "DsColliders.hpp"
 #include "EcoSysLabLayer.hpp"
 #include "EditorLayer.hpp"
 #include "Tree.hpp"
@@ -73,18 +74,58 @@ void Climate::PrepareForGrowth() {
   auto min_bound = estimator.voxel_grid.GetMinBound();
   auto max_bound = estimator.voxel_grid.GetMaxBound();
   bool bound_changed = false;
+  struct GrowthObstacle {
+    glm::vec3 min_bound;
+    glm::vec3 max_bound;
+    float shadow;
+    float biomass;
+    unsigned entity_index;
+  };
+  std::vector<GrowthObstacle> growth_obstacles;
+  if (const auto* obstacle_entities = scene->UnsafeGetPrivateComponentOwnersList<DsBoxCollider>()) {
+    for (const auto& obstacle_entity : *obstacle_entities) {
+      const auto obstacle = scene->GetOrSetPrivateComponent<DsBoxCollider>(obstacle_entity).lock();
+      if (!obstacle || !obstacle->IsEnabled() || !scene->IsEntityEnabled(obstacle_entity) ||
+          !obstacle->affect_tree_growth)
+        continue;
+      const auto transform = scene->GetDataComponent<GlobalTransform>(obstacle_entity);
+      const auto rotation = glm::mat3_cast(transform.GetRotation());
+      const auto absolute_rotation =
+          glm::mat3(glm::abs(rotation[0]), glm::abs(rotation[1]), glm::abs(rotation[2]));
+      const auto half_extent = absolute_rotation * glm::abs(obstacle->scale * transform.GetScale());
+      const auto obstacle_min = transform.GetPosition() - half_extent;
+      const auto obstacle_max = transform.GetPosition() + half_extent;
+      growth_obstacles.push_back({obstacle_min, obstacle_max, obstacle->tree_growth_shadow,
+                                  obstacle->tree_growth_biomass, obstacle_entity.GetIndex()});
+      if (obstacle_min.x <= min_bound.x || obstacle_min.y <= min_bound.y || obstacle_min.z <= min_bound.z ||
+          obstacle_max.x >= max_bound.x || obstacle_max.y >= max_bound.y || obstacle_max.z >= max_bound.z) {
+        min_bound = glm::min(obstacle_min - glm::vec3(estimator.voxel_size), min_bound);
+        max_bound = glm::max(obstacle_max + glm::vec3(estimator.voxel_size), max_bound);
+        bound_changed = true;
+      }
+    }
+  }
   for (const auto& tree_entity : *tree_entities) {
     const auto tree = scene->GetOrSetPrivateComponent<Tree>(tree_entity).lock();
     const auto global_transform = scene->GetDataComponent<GlobalTransform>(tree_entity).value;
-
-    tree->shoot_model.RefShootSkeleton().CalculateMinMax();
-    const glm::vec3 current_min_bound = global_transform * glm::vec4(tree->shoot_model.RefShootSkeleton().min, 1.0f);
-
-    if (const glm::vec3 current_max_bound =
-            global_transform * glm::vec4(tree->shoot_model.RefShootSkeleton().max, 1.0f);
-        current_min_bound.x <= min_bound.x || current_min_bound.y <= min_bound.y ||
-        current_min_bound.z <= min_bound.z || current_max_bound.x >= max_bound.x ||
-        current_max_bound.y >= max_bound.y || current_max_bound.z >= max_bound.z) {
+    const auto& shoot_skeleton = tree->shoot_model.PeekShootSkeleton();
+    glm::vec3 current_min_bound(std::numeric_limits<float>::max());
+    glm::vec3 current_max_bound(std::numeric_limits<float>::lowest());
+    bool has_finite_position = false;
+    for (const auto node_handle : shoot_skeleton.PeekSortedNodeList()) {
+      const glm::vec3 world_position =
+          global_transform * glm::vec4(shoot_skeleton.PeekNode(node_handle).info.global_position, 1.0f);
+      if (!std::isfinite(world_position.x) || !std::isfinite(world_position.y) ||
+          !std::isfinite(world_position.z))
+        continue;
+      current_min_bound = glm::min(current_min_bound, world_position);
+      current_max_bound = glm::max(current_max_bound, world_position);
+      has_finite_position = true;
+    }
+    if (has_finite_position &&
+        (current_min_bound.x <= min_bound.x || current_min_bound.y <= min_bound.y ||
+         current_min_bound.z <= min_bound.z || current_max_bound.x >= max_bound.x ||
+         current_max_bound.y >= max_bound.y || current_max_bound.z >= max_bound.z)) {
       min_bound = glm::min(current_min_bound - glm::vec3(1.0f, 0.1f, 1.0f), min_bound);
       max_bound = glm::max(current_max_bound + glm::vec3(1.0f), max_bound);
       bound_changed = true;
@@ -96,6 +137,10 @@ void Climate::PrepareForGrowth() {
   for (const auto& tree_entity : *tree_entities) {
     const auto tree = scene->GetOrSetPrivateComponent<Tree>(tree_entity).lock();
     tree->RegisterVoxel();
+  }
+  for (const auto& obstacle : growth_obstacles) {
+    estimator.AddBoxObstacle(obstacle.min_bound, obstacle.max_bound, obstacle.shadow, obstacle.biomass,
+                             obstacle.entity_index);
   }
 
   estimator.LightPropagation(eco_sys_lab_layer->simulation_settings);

@@ -527,6 +527,8 @@ void VoxelGrid<VoxelData>::PeekEach(const glm::vec3& center, const float min_rad
 
 template <typename VoxelData>
 bool VoxelGrid<VoxelData>::IsValid(const glm::vec3& position) const {
+  if (!std::isfinite(position.x) || !std::isfinite(position.y) || !std::isfinite(position.z))
+    return false;
   if (const auto max_bound = min_bound_ + voxel_size_ * glm::vec3(resolution_);
       position.x < min_bound_.x || position.y < min_bound_.y || position.z < min_bound_.z ||
       position.x >= max_bound.x || position.y >= max_bound.y || position.z >= max_bound.z)

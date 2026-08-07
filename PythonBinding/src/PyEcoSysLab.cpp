@@ -1,4 +1,5 @@
 #include "PyEcoSysLab.hpp"
+#include "EcoSysLabSerializationAdapters.hpp"
 #include "PyEvoEngine.hpp"
 #include "Serialization.hpp"
 
@@ -9,20 +10,6 @@
 #ifdef ECOSYSLAB_PACKAGE
 namespace py = pybind11;
 using namespace py_eco_sys_lab_package;
-
-namespace {
-template <typename T>
-void RegisterSerializationHandler(const std::string& type_name) {
-  Serialization::RegisterSerializationHandler<T>(
-      [](YAML::Emitter& out, const T& target) {
-        target.Serialize(out);
-      },
-      [](const YAML::Node& in, T& target) {
-        target.Deserialize(in);
-      },
-      {}, type_name);
-}
-}  // namespace
 
 #endif
 void PyEcoSysLab::PushEcoSysLabLayer() {
@@ -35,7 +22,8 @@ void PyEcoSysLab::RegisterClasses() {
   application.RegisterPrivateComponent<Physics2DDemo>("Physics2DDemo");
   application.RegisterPrivateComponent<ParticlePhysics2DDemo>("ParticlePhysics2DDemo");
   application.RegisterPrivateComponent<TreePointCloudScanner>("TreePointCloudScanner");
-  RegisterSerializationHandler<ObjectRotator>("ObjectRotator");
+  Serialization::RegisterSerializationHandler<ObjectRotator>(SerializeObjectRotator, DeserializeObjectRotator, {},
+                                                             "ObjectRotator");
   Serialization::RegisterSerializationHandler<TreePointCloudScanner>(
       SerializeTreePointCloudScanner, DeserializeTreePointCloudScanner, {}, "TreePointCloudScanner");
 #endif
@@ -66,6 +54,11 @@ void PyEcoSysLab::Initialize(pybind11::module& m) {
                      &ConnectivityGraphSettings::max_scatter_point_connection_height);
 
 #ifdef DATASET_GENERATION_PACKAGE
+  py::enum_<PointCloudCaptureSettings::CaptureMode>(m, "PointCloudCaptureMode")
+      .value("OptiX", PointCloudCaptureSettings::CaptureMode::OptiX)
+      .value("Cpu", PointCloudCaptureSettings::CaptureMode::Cpu)
+      .value("Gpu", PointCloudCaptureSettings::CaptureMode::Gpu);
+
   py::class_<TreePointCloudPointSettings>(m, "TreePointCloudPointSettings")
       .def(py::init<>())
       .def_readwrite("variance", &TreePointCloudPointSettings::variance)
@@ -77,10 +70,17 @@ void PyEcoSysLab::Initialize(pybind11::module& m) {
       .def_readwrite("line_index", &TreePointCloudPointSettings::line_index)
       .def_readwrite("branch_index", &TreePointCloudPointSettings::branch_index)
       .def_readwrite("internode_index", &TreePointCloudPointSettings::internode_index)
+      .def_readwrite("capture_ground", &TreePointCloudPointSettings::capture_ground)
       .def_readwrite("bounding_box_limit", &TreePointCloudPointSettings::bounding_box_limit);
 
   py::class_<TreePointCloudCircularCaptureSettings>(m, "TreePointCloudCircularCaptureSettings")
       .def(py::init<>())
+      .def_property(
+          "capture_mode",
+          [](const TreePointCloudCircularCaptureSettings& settings) { return settings.capture_mode; },
+          [](TreePointCloudCircularCaptureSettings& settings, const PointCloudCaptureSettings::CaptureMode mode) {
+            settings.capture_mode = mode;
+          })
       .def_readwrite("pitch_angle_start", &TreePointCloudCircularCaptureSettings::pitch_angle_start)
       .def_readwrite("pitch_angle_step", &TreePointCloudCircularCaptureSettings::pitch_angle_step)
       .def_readwrite("pitch_angle_end", &TreePointCloudCircularCaptureSettings::pitch_angle_end)
@@ -90,8 +90,25 @@ void PyEcoSysLab::Initialize(pybind11::module& m) {
       .def_readwrite("distance_from_trees", &TreePointCloudCircularCaptureSettings::distance_from_trees)
       .def_readwrite("capture_height", &TreePointCloudCircularCaptureSettings::capture_height)
       .def_readwrite("camera_fov", &TreePointCloudCircularCaptureSettings::camera_fov)
+      .def_readwrite("camera_focus_point", &TreePointCloudCircularCaptureSettings::camera_focus_point)
       .def_readwrite("scan_resolution", &TreePointCloudCircularCaptureSettings::scan_resolution)
       .def_readwrite("max_capture_depth", &TreePointCloudCircularCaptureSettings::max_capture_depth);
+
+  py::class_<TreePointCloudSphericalCaptureSettings>(m, "TreePointCloudSphericalCaptureSettings")
+      .def(py::init<>())
+      .def_property(
+          "capture_mode",
+          [](const TreePointCloudSphericalCaptureSettings& settings) { return settings.capture_mode; },
+          [](TreePointCloudSphericalCaptureSettings& settings, const PointCloudCaptureSettings::CaptureMode mode) {
+            settings.capture_mode = mode;
+          })
+      .def_readwrite("scanner_position", &TreePointCloudSphericalCaptureSettings::scanner_position)
+      .def_readwrite("horizontal_angle_start", &TreePointCloudSphericalCaptureSettings::horizontal_angle_start)
+      .def_readwrite("horizontal_angle_end", &TreePointCloudSphericalCaptureSettings::horizontal_angle_end)
+      .def_readwrite("vertical_angle_start", &TreePointCloudSphericalCaptureSettings::vertical_angle_start)
+      .def_readwrite("vertical_angle_end", &TreePointCloudSphericalCaptureSettings::vertical_angle_end)
+      .def_readwrite("angular_step", &TreePointCloudSphericalCaptureSettings::angular_step)
+      .def_readwrite("max_capture_depth", &TreePointCloudSphericalCaptureSettings::max_capture_depth);
 #endif
 
   py::class_<ReconstructionSettings>(m, "ReconstructionSettings")
@@ -134,9 +151,11 @@ void PyEcoSysLab::Initialize(pybind11::module& m) {
   py::class_<TreeMeshGeneratorSettings>(m, "TreeMeshGeneratorSettings")
       .def(py::init<>())
       .def_readwrite("enable_foliage", &TreeMeshGeneratorSettings::enable_foliage)
+      .def_readwrite("foliage_instancing", &TreeMeshGeneratorSettings::foliage_instancing)
       .def_readwrite("enable_fruit", &TreeMeshGeneratorSettings::enable_fruit)
       .def_readwrite("enable_shoot_branch", &TreeMeshGeneratorSettings::enable_shoot_branch)
       .def_readwrite("enable_root_branch", &TreeMeshGeneratorSettings::enable_root_branch)
+      .def_readwrite("enable_fine_root", &TreeMeshGeneratorSettings::enable_fine_root)
       .def_readwrite("presentation_override_settings", &TreeMeshGeneratorSettings::presentation_override_settings)
       .def_readwrite("x_subdivision", &TreeMeshGeneratorSettings::x_subdivision)
       .def_readwrite("trunk_y_subdivision", &TreeMeshGeneratorSettings::trunk_y_subdivision)

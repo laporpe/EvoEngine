@@ -934,8 +934,9 @@ void OptiXRayTracer::CreateMissPrograms() {
     OPTIX_CHECK(
         optixProgramGroupCreate(optix_device_context_, &pg_desc, 1, &pg_options, log, &sizeof_log,
                                 &illumination_estimation_pipeline_.miss_program_groups[RayType::SpacialSampling]));
-    illumination_estimation_pipeline_.miss_program_groups[RayType::Shadow] =
-        illumination_estimation_pipeline_.miss_program_groups[RayType::Radiance];
+    pg_desc.miss.entryFunctionName = "__miss__IE_S";
+    OPTIX_CHECK(optixProgramGroupCreate(optix_device_context_, &pg_desc, 1, &pg_options, log, &sizeof_log,
+                                        &illumination_estimation_pipeline_.miss_program_groups[RayType::Shadow]));
 #ifndef NDEBUG
     if (sizeof_log > 1)
       std::cout << log << std::endl;
@@ -1341,8 +1342,7 @@ void OptiXRayTracer::CreateHitGroupPrograms() {
   };
   create_shadow_hit_groups(camera_rendering_pipeline_, "__closesthit__CR_S", "__anyhit__CR_S");
   create_shadow_hit_groups(camera_spectral_pipeline_, "__closesthit__CS_S", "__anyhit__CS_S");
-  illumination_estimation_pipeline_.hit_group_program_groups[RayType::Shadow] =
-      illumination_estimation_pipeline_.hit_group_program_groups[RayType::Radiance];
+  create_shadow_hit_groups(illumination_estimation_pipeline_, "__closesthit__IE_S", "__anyhit__IE_S");
   illumination_estimation_spectral_pipeline_.hit_group_program_groups[RayType::Shadow] =
       illumination_estimation_spectral_pipeline_.hit_group_program_groups[RayType::Radiance];
   point_cloud_scanning_pipeline_.hit_group_program_groups[RayType::Shadow] =

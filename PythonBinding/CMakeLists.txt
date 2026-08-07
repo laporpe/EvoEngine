@@ -101,6 +101,13 @@ function(register_python_binding target_name default_enable)
 					LSystemPackage
 					)
 			endif()
+			if (${target_name} STREQUAL "PyEcoSysLab")
+				target_link_libraries(${target_name}
+					PRIVATE
+					EcoSysLabPackage
+					DatasetGenerationPackage
+					)
+			endif()
 			message("Enabled [${target_name}] PythonBinding.")
 		endif()
 	endif ()
@@ -108,9 +115,8 @@ endfunction()
 
 register_core_python_binding()
 
-set("PythonBinding-PyEcoSysLab" OFF CACHE BOOL "Package-specific Python bindings are disabled during runtime package migration." FORCE)
 set("PythonBinding-PyDigitalAgriculture" ON CACHE BOOL "Add Digital Agriculture Python binding." FORCE)
-register_python_binding(PyEcoSysLab OFF)
+register_python_binding(PyEcoSysLab ON)
 register_python_binding(PyDigitalAgriculture ON)
 
 if (${CMAKE_BINARY_DIR} STREQUAL ${PROJECT_BINARY_DIR})

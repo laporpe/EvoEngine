@@ -79,5 +79,11 @@ class EnvironmentGrid {
    * @param registration The internode voxel registration details.
    */
   void AddNode(const InternodeVoxelRegistration& registration);
+
+  /**
+   * @brief Registers an axis-aligned artificial obstacle for light and crown-shyness calculations.
+   */
+  void AddBoxObstacle(const glm::vec3& min_bound, const glm::vec3& max_bound, float shadow, float biomass,
+                      unsigned obstacle_index);
 };
 }  // namespace eco_sys_lab_package

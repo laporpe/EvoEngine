@@ -3,6 +3,10 @@
 using namespace eco_sys_lab_package;
 
 float EnvironmentGrid::Sample(const glm::vec3& position, glm::vec3& light_direction) const {
+  if (!voxel_grid.IsValid(position)) {
+    light_direction = glm::vec3(0.0f, 1.0f, 0.0f);
+    return 1.0f;
+  }
   const auto coordinate = voxel_grid.GetCoordinate(position);
   const auto& data = voxel_grid.Peek(coordinate);
   light_direction = data.light_direction;
@@ -161,4 +165,24 @@ void EnvironmentGrid::AddBiomass(const glm::vec3& position, const float value) {
 void EnvironmentGrid::AddNode(const InternodeVoxelRegistration& registration) {
   auto& data = voxel_grid.Ref(registration.position);
   data.internode_voxel_registrations.emplace_back(registration);
+}
+
+void EnvironmentGrid::AddBoxObstacle(const glm::vec3& min_bound, const glm::vec3& max_bound, const float shadow,
+                                     const float biomass, const unsigned obstacle_index) {
+  const auto resolution = voxel_grid.GetResolution();
+  const auto start = glm::clamp(voxel_grid.GetCoordinate(min_bound), glm::ivec3(0), resolution - 1);
+  const auto end = glm::clamp(voxel_grid.GetCoordinate(max_bound), glm::ivec3(0), resolution - 1);
+  for (int x = start.x; x <= end.x; x++) {
+    for (int y = start.y; y <= end.y; y++) {
+      for (int z = start.z; z <= end.z; z++) {
+        const auto coordinate = glm::ivec3(x, y, z);
+        auto& voxel = voxel_grid.Ref(coordinate);
+        voxel.self_shadow = glm::max(voxel.self_shadow, shadow);
+        voxel.total_biomass += biomass;
+        auto& registration = voxel.internode_voxel_registrations.emplace_back();
+        registration.position = voxel_grid.GetPosition(coordinate);
+        registration.tree_skeleton_index = obstacle_index;
+      }
+    }
+  }
 }

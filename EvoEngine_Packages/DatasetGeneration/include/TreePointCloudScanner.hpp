@@ -15,6 +15,7 @@ struct TreePointCloudPointSettings {
   bool line_index = false;
   bool tree_part_index = false;
   bool tree_part_type_index = false;
+  bool capture_ground = true;
 
   float bounding_box_limit = 1.f;
 
@@ -48,6 +49,23 @@ class TreePointCloudCircularCaptureSettings : public PointCloudCaptureSettings {
 
   GlobalTransform GetTransform(const glm::vec2& focus_point, float turn_angle, float pitch_angle) const;
   void GenerateSamples(std::vector<PointCloudSample>& point_cloud_samples) override;
+};
+
+class TreePointCloudSphericalCaptureSettings : public PointCloudCaptureSettings {
+ public:
+  glm::vec3 scanner_position = {0.0f, 1.5f, 0.0f};
+  float horizontal_angle_start = 0.0f;
+  float horizontal_angle_end = 360.0f;
+  float vertical_angle_start = -90.0f;
+  float vertical_angle_end = 90.0f;
+  float angular_step = 0.04f;
+  float max_capture_depth = 70.0f;
+
+  bool DrawGui() override;
+  void Save(const std::string& name, YAML::Emitter& out) const override;
+  void Load(const std::string& name, const YAML::Node& in) override;
+  void GenerateSamples(std::vector<PointCloudSample>& point_cloud_samples) override;
+  bool SampleFilter(const PointCloudSample& sample) override;
 };
 
 class TreePointCloudGridCaptureSettings : public PointCloudCaptureSettings {

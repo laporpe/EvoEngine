@@ -120,6 +120,11 @@ bool DsBoxCollider::DrawGui(const std::shared_ptr<EditorLayer>& editor_layer) {
   if (ImGui::DragFloat3("Scale", &scale.x, 0.01f, 0.0f, 10.0f)) {
     changed = true;
   }
+  changed = ImGui::Checkbox("Affect tree growth", &affect_tree_growth) || changed;
+  if (affect_tree_growth) {
+    changed = ImGui::DragFloat("Tree growth shadow", &tree_growth_shadow, 0.01f, 0.0f, 1.0f) || changed;
+    changed = ImGui::DragFloat("Tree growth biomass", &tree_growth_biomass, 0.01f, 0.0f, 10.0f) || changed;
+  }
 
   if (ImGui::DragFloat("Softness", &softness, 0.01f, 0.0f, 1.0f)) {
     changed = true;
@@ -255,6 +260,9 @@ void eco_sys_lab_package::SerializeDsBoxCollider(YAML::Emitter& out, const DsBox
   out << YAML::Key << "bound_color" << YAML::Value << target.bound_color;
   out << YAML::Key << "scale" << YAML::Value << target.scale;
   out << YAML::Key << "softness" << YAML::Value << target.softness;
+  out << YAML::Key << "affect_tree_growth" << YAML::Value << target.affect_tree_growth;
+  out << YAML::Key << "tree_growth_shadow" << YAML::Value << target.tree_growth_shadow;
+  out << YAML::Key << "tree_growth_biomass" << YAML::Value << target.tree_growth_biomass;
 }
 
 void eco_sys_lab_package::DeserializeDsBoxCollider(const YAML::Node& in, DsBoxCollider& target) {
@@ -264,6 +272,12 @@ void eco_sys_lab_package::DeserializeDsBoxCollider(const YAML::Node& in, DsBoxCo
     target.scale = in["scale"].as<glm::vec3>();
   if (in["softness"])
     target.softness = in["softness"].as<float>();
+  if (in["affect_tree_growth"])
+    target.affect_tree_growth = in["affect_tree_growth"].as<bool>();
+  if (in["tree_growth_shadow"])
+    target.tree_growth_shadow = in["tree_growth_shadow"].as<float>();
+  if (in["tree_growth_biomass"])
+    target.tree_growth_biomass = in["tree_growth_biomass"].as<float>();
 }
 
 void DsCylinderCollider::RenderBound(const std::shared_ptr<EditorLayer>& editor_layer,

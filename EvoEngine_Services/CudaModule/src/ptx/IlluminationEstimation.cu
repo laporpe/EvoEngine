@@ -3,8 +3,10 @@
 namespace evo_engine {
 extern "C" __constant__ IlluminationEstimationLaunchParams illuminationEstimationLaunchParams;
 
+constexpr float kUniformHemispherePdf = 0.5f / 3.14159265358979323846f;
+
 static __forceinline__ __device__ void SampleProbePoint(const Vertex &a, const Vertex &b, const Vertex &c,
-                                                        Random &random, glm::vec3 &position, glm::vec3 &normal) {
+                                                         Random &random, glm::vec3 &position, glm::vec3 &normal) {
   float coord_a = random();
   float coord_b = random();
   if (coord_a + coord_b > 1.0f) {
@@ -16,13 +18,30 @@ static __forceinline__ __device__ void SampleProbePoint(const Vertex &a, const V
   normal = glm::normalize(coord_c * a.normal + coord_a * b.normal + coord_b * c.normal);
 }
 
+static __forceinline__ __device__ void AccumulateSkydomeSun(const glm::vec3 &position, const glm::vec3 &normal,
+                                                            PerRayData<glm::vec3> &per_ray_data,
+                                                            glm::vec3 &point_energy, glm::vec3 &point_direction) {
+  const auto &environment = illuminationEstimationLaunchParams.ray_tracer_properties.environment;
+  glm::vec3 sun_direction;
+  float n_dot_l;
+  if (TraceSkydomeSun(environment, per_ray_data.random, illuminationEstimationLaunchParams.traversable, position,
+                      normal, sun_direction, n_dot_l)) {
+    const glm::vec3 energy = environment.sun_color * environment.sun_intensity * n_dot_l;
+    point_energy += energy;
+    point_direction += sun_direction * glm::length(energy);
+  }
+}
+
 #pragma region Closest hit functions
 extern "C" __global__ void __closesthit__IE_R() {
   ClosestHitFunc(illuminationEstimationLaunchParams.ray_tracer_properties,
-                 illuminationEstimationLaunchParams.traversable);
+                 illuminationEstimationLaunchParams.traversable, true);
 }
 extern "C" __global__ void __closesthit__IE_SS() {
   SSHit();
+}
+extern "C" __global__ void __closesthit__IE_S() {
+  optixSetPayload_0(0);
 }
 #pragma endregion
 #pragma region Any hit functions
@@ -32,12 +51,18 @@ extern "C" __global__ void __anyhit__IE_R() {
 extern "C" __global__ void __anyhit__IE_SS() {
   SSAnyHit();
 }
+extern "C" __global__ void __anyhit__IE_S() {
+  ShadowAnyHitFunc();
+}
 #pragma endregion
 #pragma region Miss functions
 extern "C" __global__ void __miss__IE_R() {
   MissFunc(illuminationEstimationLaunchParams.ray_tracer_properties);
 }
 extern "C" __global__ void __miss__IE_SS() {
+}
+extern "C" __global__ void __miss__IE_S() {
+  ShadowMissFunc();
 }
 #pragma endregion
 #pragma region Main ray generation
@@ -68,6 +93,7 @@ extern "C" __global__ void __raygen__IE() {
       glm::vec3 position;
       glm::vec3 normal;
       SampleProbePoint(a, b, c, perRayData.random, position, normal);
+      AccumulateSkydomeSun(position, normal, perRayData, pointEnergy, pointDirection);
       rayDir = RandomSampleHemisphere(perRayData.random, normal);
       rayOrigin = position + normal * pushDistance;
       float3 rayOriginInternal = make_float3(rayOrigin.x, rayOrigin.y, rayOrigin.z);
@@ -82,7 +108,7 @@ extern "C" __global__ void __raygen__IE() {
                  static_cast<int>(RayType::RayTypeCount),  // SBT stride
                  static_cast<int>(RayType::Radiance),      // missSBTIndex
                  u0, u1);
-      auto energy = perRayData.energy * glm::abs(glm::dot(normal, rayDir));
+      auto energy = perRayData.energy * glm::abs(glm::dot(normal, rayDir)) / kUniformHemispherePdf;
       pointEnergy += energy;
       pointDirection += rayDir * glm::length(energy);
     }
@@ -97,6 +123,7 @@ extern "C" __global__ void __raygen__IE() {
       glm::vec3 normal;
       SampleProbePoint(a, b, c, perRayData.random, position, normal);
       normal = -normal;
+      AccumulateSkydomeSun(position, normal, perRayData, pointEnergy, pointDirection);
       rayDir = RandomSampleHemisphere(perRayData.random, normal);
       rayOrigin = position + normal * pushDistance;
       float3 rayOriginInternal = make_float3(rayOrigin.x, rayOrigin.y, rayOrigin.z);
@@ -111,7 +138,7 @@ extern "C" __global__ void __raygen__IE() {
                  static_cast<int>(RayType::RayTypeCount),  // SBT stride
                  static_cast<int>(RayType::Radiance),      // missSBTIndex
                  u0, u1);
-      auto energy = perRayData.energy * glm::abs(glm::dot(normal, rayDir));
+      auto energy = perRayData.energy * glm::abs(glm::dot(normal, rayDir)) / kUniformHemispherePdf;
       pointEnergy += energy;
       pointDirection += rayDir * glm::length(energy);
     }

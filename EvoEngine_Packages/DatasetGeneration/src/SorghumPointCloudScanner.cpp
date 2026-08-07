@@ -8,6 +8,9 @@
 #include "Sorghum.hpp"
 #include "Tinyply.hpp"
 #include "TreePointCloudScanner.hpp"
+
+#include <iomanip>
+#include <unordered_set>
 #ifdef CUDA_MODULE_SERVICE
 #  include "CUDAModule.hpp"
 #  include "RayTracerLayer.hpp"
@@ -120,6 +123,69 @@ void SorghumGantryCaptureSettings::GenerateSamples(std::vector<PointCloudSample>
 bool SorghumGantryCaptureSettings::SampleFilter(const PointCloudSample& sample) {
   return glm::abs(sample.hit_info.position.x) < bounding_box_size &&
          glm::abs(sample.hit_info.position.z) < bounding_box_size;
+}
+
+bool SorghumFractionalCoverSettings::DrawGui() {
+  bool changed = false;
+  changed |= ImGui::DragFloat2("Center", &center.x, 0.05f);
+  changed |= ImGui::DragFloat2("Area size", &area_size.x, 0.05f, 0.01f, 10000.f);
+  changed |= ImGui::DragInt2("Resolution", &resolution.x, 1.f, 1, 4096);
+  changed |= ImGui::DragInt("Samples per pixel axis", &samples_per_pixel_axis, 1.f, 1, 64);
+  changed |= ImGui::DragFloat("Scan height", &scan_height, 0.05f);
+  return changed;
+}
+
+void SorghumFractionalCoverSettings::Save(const std::string& name, YAML::Emitter& out) const {
+  out << YAML::Key << name << YAML::Value << YAML::BeginMap;
+  out << YAML::Key << "center" << YAML::Value << center;
+  out << YAML::Key << "area_size" << YAML::Value << area_size;
+  out << YAML::Key << "resolution" << YAML::Value << resolution;
+  out << YAML::Key << "samples_per_pixel_axis" << YAML::Value << samples_per_pixel_axis;
+  out << YAML::Key << "scan_height" << YAML::Value << scan_height;
+  out << YAML::EndMap;
+}
+
+void SorghumFractionalCoverSettings::Load(const std::string& name, const YAML::Node& in) {
+  if (!in[name])
+    return;
+  const auto& settings = in[name];
+  if (settings["center"])
+    center = settings["center"].as<glm::vec2>();
+  if (settings["area_size"])
+    area_size = settings["area_size"].as<glm::vec2>();
+  if (settings["resolution"])
+    resolution = settings["resolution"].as<glm::ivec2>();
+  if (settings["samples_per_pixel_axis"])
+    samples_per_pixel_axis = settings["samples_per_pixel_axis"].as<int>();
+  if (settings["scan_height"])
+    scan_height = settings["scan_height"].as<float>();
+}
+
+void SorghumFractionalCoverSettings::GenerateSamples(std::vector<PointCloudSample>& samples) const {
+  if (resolution.x <= 0 || resolution.y <= 0 || samples_per_pixel_axis <= 0 || area_size.x <= 0.f ||
+      area_size.y <= 0.f) {
+    samples.clear();
+    return;
+  }
+  const size_t pixel_count = static_cast<size_t>(resolution.x) * resolution.y;
+  const size_t samples_per_pixel = static_cast<size_t>(samples_per_pixel_axis) * samples_per_pixel_axis;
+  samples.resize(pixel_count * samples_per_pixel);
+  for (size_t pixel_index = 0; pixel_index < pixel_count; ++pixel_index) {
+    const int pixel_x = static_cast<int>(pixel_index % resolution.x);
+    const int pixel_y = static_cast<int>(pixel_index / resolution.x);
+    for (int sample_y = 0; sample_y < samples_per_pixel_axis; ++sample_y) {
+      for (int sample_x = 0; sample_x < samples_per_pixel_axis; ++sample_x) {
+        const float u = (static_cast<float>(pixel_x) + (static_cast<float>(sample_x) + 0.5f) / samples_per_pixel_axis) /
+                        static_cast<float>(resolution.x);
+        const float v = (static_cast<float>(pixel_y) + (static_cast<float>(sample_y) + 0.5f) / samples_per_pixel_axis) /
+                        static_cast<float>(resolution.y);
+        auto& sample = samples[pixel_index * samples_per_pixel +
+                               static_cast<size_t>(sample_y * samples_per_pixel_axis + sample_x)];
+        sample.start = glm::vec3(center.x + (u - 0.5f) * area_size.x, scan_height, center.y + (v - 0.5f) * area_size.y);
+        sample.direction = glm::vec3(0.f, -1.f, 0.f);
+      }
+    }
+  }
 }
 
 void SorghumPointCloudScanner::Scan(const std::shared_ptr<PointCloudCaptureSettings>& capture_settings,
@@ -292,17 +358,17 @@ void SorghumPointCloudScanner::Scan(const std::shared_ptr<PointCloudCaptureSetti
     }
 
     if (sorghum_point_cloud_point_settings.type_index) {
-      //if (leaf_search != leaf_mesh_renderer_handles.end()) {
-      //  type_indices.emplace_back(0);
-      //} else if (stem_search != stem_mesh_renderer_handles.end()) {
-      //  type_indices.emplace_back(1);
-      //} else if (panicle_search != panicle_mesh_renderer_handles.end()) {
-      //  type_indices.emplace_back(2);
-      //} else if (sample.handle == ground_mesh_renderer_handle) {
-      //  type_indices.emplace_back(3);
-      //} else {
-      //  type_indices.emplace_back(-1);
-      //}
+      // if (leaf_search != leaf_mesh_renderer_handles.end()) {
+      //   type_indices.emplace_back(0);
+      // } else if (stem_search != stem_mesh_renderer_handles.end()) {
+      //   type_indices.emplace_back(1);
+      // } else if (panicle_search != panicle_mesh_renderer_handles.end()) {
+      //   type_indices.emplace_back(2);
+      // } else if (sample.handle == ground_mesh_renderer_handle) {
+      //   type_indices.emplace_back(3);
+      // } else {
+      //   type_indices.emplace_back(-1);
+      // }
 
       if (leaf_search != leaf_mesh_renderer_handles.end()) {
         type_indices.emplace_back(2);
@@ -437,6 +503,149 @@ void SorghumPointCloudScanner::Capture(const std::filesystem::path& save_path,
   }
 }
 
+SorghumFractionalCoverResult SorghumPointCloudScanner::CalculateFractionalCover(
+    const SorghumFractionalCoverSettings& settings) const {
+  SorghumFractionalCoverResult result;
+  const auto scene = GetScene();
+  if (!scene) {
+    EVOENGINE_ERROR("Sorghum fractional cover failed: no active scene!")
+    return result;
+  }
+  const auto sorghum_entities = scene->UnsafeGetPrivateComponentOwnersList<Sorghum>();
+  if (!sorghum_entities || sorghum_entities->empty()) {
+    EVOENGINE_ERROR("Sorghum fractional cover failed: no sorghums!")
+    return result;
+  }
+
+  std::unordered_set<Handle> plant_renderer_handles;
+  for (const auto& sorghum_entity : *sorghum_entities) {
+    if (!scene->IsEntityValid(sorghum_entity))
+      continue;
+    std::vector<Entity> stack = scene->GetChildren(sorghum_entity);
+    while (!stack.empty()) {
+      const auto entity = stack.back();
+      stack.pop_back();
+      if (!scene->IsEntityValid(entity))
+        continue;
+      if (scene->HasPrivateComponent<MeshRenderer>(entity))
+        plant_renderer_handles.emplace(scene->GetOrSetPrivateComponent<MeshRenderer>(entity).lock()->GetHandle());
+      if (scene->HasPrivateComponent<Particles>(entity))
+        plant_renderer_handles.emplace(scene->GetOrSetPrivateComponent<Particles>(entity).lock()->GetHandle());
+      if (scene->HasPrivateComponent<StrandsRenderer>(entity))
+        plant_renderer_handles.emplace(scene->GetOrSetPrivateComponent<StrandsRenderer>(entity).lock()->GetHandle());
+      const auto& children = scene->GetChildren(entity);
+      stack.insert(stack.end(), children.begin(), children.end());
+    }
+  }
+
+  Handle ground_renderer_handle = 0;
+  if (const auto soil_candidate = EcoSysLabLayer::FindSoil(); !soil_candidate.expired()) {
+    const auto soil = soil_candidate.lock();
+    const auto soil_entity = soil->GetOwner();
+    if (scene->IsEntityValid(soil_entity)) {
+      scene->ForEachChild(soil_entity, [&](const Entity child) {
+        if (scene->GetEntityName(child) == "Ground Mesh" && scene->HasPrivateComponent<MeshRenderer>(child))
+          ground_renderer_handle = scene->GetOrSetPrivateComponent<MeshRenderer>(child).lock()->GetHandle();
+      });
+    }
+  }
+
+  std::vector<PointCloudSample> samples;
+  settings.GenerateSamples(samples);
+  if (samples.empty()) {
+    EVOENGINE_ERROR("Sorghum fractional cover failed: invalid sampling settings!")
+    return result;
+  }
+
+#ifdef CUDA_MODULE_SERVICE
+  const auto ray_tracer_layer = ApplicationContext::Get().GetLayer<RayTracerLayer>();
+  if (!ray_tracer_layer) {
+    EVOENGINE_ERROR("Sorghum fractional cover failed: missing RayTracerLayer!")
+    return result;
+  }
+  CudaModule::SamplePointCloud(ray_tracer_layer->environment_properties, samples);
+#else
+  EVOENGINE_ERROR("Sorghum fractional cover failed: missing CudaModule Service!")
+  return result;
+#endif
+
+  result.resolution = settings.resolution;
+  result.cover.resize(static_cast<size_t>(settings.resolution.x) * settings.resolution.y);
+  const size_t samples_per_pixel =
+      static_cast<size_t>(settings.samples_per_pixel_axis) * settings.samples_per_pixel_axis;
+  for (size_t pixel_index = 0; pixel_index < result.cover.size(); ++pixel_index) {
+    uint32_t pixel_plant_hits = 0;
+    for (size_t local_sample_index = 0; local_sample_index < samples_per_pixel; ++local_sample_index) {
+      const auto& sample = samples[pixel_index * samples_per_pixel + local_sample_index];
+      if (sample.hit_count == 0) {
+        ++result.miss_count;
+      } else if (plant_renderer_handles.find(sample.handle) != plant_renderer_handles.end()) {
+        ++pixel_plant_hits;
+        ++result.plant_hits;
+      } else if (sample.handle == ground_renderer_handle) {
+        ++result.ground_hits;
+      } else {
+        ++result.unknown_hits;
+      }
+    }
+    result.cover[pixel_index] = static_cast<float>(pixel_plant_hits) / static_cast<float>(samples_per_pixel);
+  }
+  result.total_cover = static_cast<float>(result.plant_hits) / static_cast<float>(samples.size());
+  return result;
+}
+
+void SorghumPointCloudScanner::SaveFractionalCover(const std::filesystem::path& save_path,
+                                                   const SorghumFractionalCoverSettings& settings,
+                                                   const SorghumFractionalCoverResult& result) {
+  if (result.cover.empty())
+    return;
+  std::ofstream csv(save_path);
+  if (!csv)
+    throw std::runtime_error("failed to open " + save_path.string());
+  csv << std::setprecision(9);
+  for (int y = 0; y < result.resolution.y; ++y) {
+    for (int x = 0; x < result.resolution.x; ++x) {
+      if (x != 0)
+        csv << ',';
+      csv << result.cover[static_cast<size_t>(y) * result.resolution.x + x];
+    }
+    csv << '\n';
+  }
+
+  auto metadata_path = save_path;
+  metadata_path.replace_extension(".yml");
+  YAML::Emitter out;
+  out << YAML::BeginMap;
+  out << YAML::Key << "method" << YAML::Value << "geometric_ray_hit_ratio";
+  out << YAML::Key << "denominator" << YAML::Value << "all_rays_in_scan_area";
+  out << YAML::Key << "plant_classes" << YAML::Value << "leaf,stem,panicle";
+  out << YAML::Key << "center" << YAML::Value << settings.center;
+  out << YAML::Key << "area_size" << YAML::Value << settings.area_size;
+  out << YAML::Key << "resolution" << YAML::Value << result.resolution;
+  out << YAML::Key << "samples_per_pixel_axis" << YAML::Value << settings.samples_per_pixel_axis;
+  out << YAML::Key << "scan_height" << YAML::Value << settings.scan_height;
+  out << YAML::Key << "total_cover" << YAML::Value << result.total_cover;
+  out << YAML::Key << "plant_hits" << YAML::Value << result.plant_hits;
+  out << YAML::Key << "ground_hits" << YAML::Value << result.ground_hits;
+  out << YAML::Key << "miss_count" << YAML::Value << result.miss_count;
+  out << YAML::Key << "unknown_hits" << YAML::Value << result.unknown_hits;
+  out << YAML::EndMap;
+  std::ofstream metadata(metadata_path);
+  if (!metadata)
+    throw std::runtime_error("failed to open " + metadata_path.string());
+  metadata << out.c_str();
+}
+
+void SorghumPointCloudScanner::CaptureFractionalCover(const std::filesystem::path& save_path) const {
+  const auto result = CalculateFractionalCover(fractional_cover_settings);
+  SaveFractionalCover(save_path, fractional_cover_settings, result);
+  if (!result.cover.empty()) {
+    EVOENGINE_LOG("Sorghum fractional cover: " + std::to_string(result.total_cover) +
+                  ", plant=" + std::to_string(result.plant_hits) + ", ground=" + std::to_string(result.ground_hits) +
+                  ", miss=" + std::to_string(result.miss_count) + ", unknown=" + std::to_string(result.unknown_hits));
+  }
+}
+
 bool dataset_generation_package::InspectSorghumPointCloudScanner(InspectorContext& context,
                                                                  SorghumPointCloudScanner& scanner) {
   (void)context;
@@ -453,6 +662,20 @@ bool dataset_generation_package::InspectSorghumPointCloudScanner(InspectorContex
         false);
     ImGui::TreePop();
   }
+  if (ImGui::TreeNodeEx("Fractional Cover")) {
+    changed |= scanner.fractional_cover_settings.DrawGui();
+    const auto& settings = scanner.fractional_cover_settings;
+    const auto ray_count = static_cast<unsigned long long>(settings.resolution.x) * settings.resolution.y *
+                           settings.samples_per_pixel_axis * settings.samples_per_pixel_axis;
+    ImGui::Text("Ray count: %llu", ray_count);
+    FileUtils::SaveFile(
+        "Capture FC", "Fractional Cover", {".csv"},
+        [&](const std::filesystem::path& path) {
+          scanner.CaptureFractionalCover(path);
+        },
+        false);
+    ImGui::TreePop();
+  }
   if (ImGui::TreeNodeEx("Point settings")) {
     if (scanner.sorghum_point_cloud_point_settings.DrawGui())
       changed = true;
@@ -463,19 +686,20 @@ bool dataset_generation_package::InspectSorghumPointCloudScanner(InspectorContex
 
 void SorghumPointCloudScanner::OnDestroy() {
   sorghum_point_cloud_point_settings = {};
+  fractional_cover_settings = {};
 }
 
 void dataset_generation_package::SerializeSorghumPointCloudScanner(YAML::Emitter& out,
                                                                    const SorghumPointCloudScanner& target) {
   target.sorghum_point_cloud_point_settings.Save("sorghum_point_cloud_point_settings", out);
+  target.fractional_cover_settings.Save("fractional_cover_settings", out);
 }
 
 void dataset_generation_package::DeserializeSorghumPointCloudScanner(const YAML::Node& in,
                                                                      SorghumPointCloudScanner& target) {
   target.sorghum_point_cloud_point_settings.Load("sorghum_point_cloud_point_settings", in);
+  target.fractional_cover_settings.Load("fractional_cover_settings", in);
 }
-
-
 
 void GantryPointCloudScanner::Scan(const std::vector<Entity>& targets, const std::vector<std::vector<int>>& label_lists,
                                    const std::shared_ptr<PointCloudCaptureSettings>& capture_settings,
@@ -551,8 +775,12 @@ void GantryPointCloudScanner::Scan(const std::vector<Entity>& targets, const std
         render_instances->BuildFromScene({}, ApplicationContext::Get().GetActiveScene(), world_bound);
       }
       CpuRayTracer cpu_ray_tracer;
-      cpu_ray_tracer.Initialize(render_instances, [&](uint32_t, const std::shared_ptr<Mesh>&) {},
-                                [&](const uint32_t, const Entity&) {});
+      cpu_ray_tracer.Initialize(
+          render_instances,
+          [&](uint32_t, const std::shared_ptr<Mesh>&) {
+          },
+          [&](const uint32_t, const Entity&) {
+          });
       cpu_ray_tracer.SamplePointCloud(pc_samples);
     } break;
     case PointCloudCaptureSettings::CaptureMode::Gpu: {
@@ -566,8 +794,12 @@ void GantryPointCloudScanner::Scan(const std::vector<Entity>& targets, const std
         render_instances->BuildFromScene({}, ApplicationContext::Get().GetActiveScene(), world_bound);
       }
       CpuRayTracer cpu_ray_tracer;
-      cpu_ray_tracer.Initialize(render_instances, [&](uint32_t, const std::shared_ptr<Mesh>&) {},
-                                [&](const uint32_t, const Entity&) {});
+      cpu_ray_tracer.Initialize(
+          render_instances,
+          [&](uint32_t, const std::shared_ptr<Mesh>&) {
+          },
+          [&](const uint32_t, const Entity&) {
+          });
       auto aggregate_scene = cpu_ray_tracer.Aggregate();
       aggregate_scene.InitializeBuffers();
       aggregate_scene.SamplePointCloudGpu(cpu_ray_tracer, pc_samples);
@@ -630,8 +862,9 @@ void GantryPointCloudScanner::Scan(const std::vector<Entity>& targets, const std
 }
 
 void GantryPointCloudScanner::SavePointCloud(const std::filesystem::path& save_path,
-    const std::vector<glm::vec3>& points, const std::vector<int>& leaf_indices,
-    const std::vector<int>& instance_indices, const std::vector<int>& type_indices) const {
+                                             const std::vector<glm::vec3>& points, const std::vector<int>& leaf_indices,
+                                             const std::vector<int>& instance_indices,
+                                             const std::vector<int>& type_indices) const {
   std::filebuf fb_binary;
   fb_binary.open(save_path.string(), std::ios::out | std::ios::binary);
   std::ostream ostream(&fb_binary);
@@ -677,9 +910,9 @@ void GantryPointCloudScanner::Deserialize(const YAML::Node& in) {
   sorghum_point_cloud_point_settings.Load("sorghum_point_cloud_point_settings", in);
 }
 
-void GantryPointCloudScanner::CaptureLabeledMeshes(const std::vector<Entity>& targets,
-    const std::vector<std::vector<int>>& label_lists, const std::filesystem::path& save_path,
-    const std::shared_ptr<PointCloudCaptureSettings>& capture_settings) const {
+void GantryPointCloudScanner::CaptureLabeledMeshes(
+    const std::vector<Entity>& targets, const std::vector<std::vector<int>>& label_lists,
+    const std::filesystem::path& save_path, const std::shared_ptr<PointCloudCaptureSettings>& capture_settings) const {
   std::vector<glm::vec3> points;
   std::vector<int> leaf_indices;
   std::vector<int> instance_indices;
