@@ -43,9 +43,22 @@ FRAME_PATTERN = "field_%04d.png"
 DESCRIPTOR_SESSION = "MeasurementStage02"
 FIELD_LEAF_VERTICAL_SUBDIVISION_M = 0.04
 FIELD_LEAF_HORIZONTAL_SUBDIVISIONS = 3
+PANICLE_CANOPY_CLEARANCE_M = 0.08
+PANICLE_PRESENTATION = {
+    "peduncle_length_m": 0.82,
+    "rachis_length_m": 0.34,
+    "branch_length_m": 0.18,
+    "primary_branch_count": 20,
+    "spikelet_pairs_per_branch": 7,
+    "spikelet_length_m": 0.010,
+    "spikelet_radius_m": 0.0045,
+    "immature_color": (0.45, 0.62, 0.12),
+    "mature_color": (0.58, 0.20, 0.055),
+}
 DEFAULT_FIELD_PROFILE = "abc-btx-vegetative"
 MEASURED_VEGETATIVE_FIELD_PROFILE = "abc-measured-vegetative-reference"
 REFERENCE_FIELD_PROFILE = "btx-pawaga-reference"
+CAMERA_VIEWS = ("perspective", "near_top_down")
 PLAYBACK_FPS = (12, 24, 48)
 MILESTONE_STATES = (1, 100, 250, 500, 750, 1000)
 FIELD_PROFILES = {
@@ -67,7 +80,9 @@ FIELD_PROFILES = {
         },
         "descriptor_session": "manual_btx_vegetative_reuse",
         "vegetative_descriptor_source": "ManualAssets/Descriptors/BTX.sorghumls",
-        "panicle_parameter_policy": "native_defaults_unchanged_no_serialized_panicle_fields",
+        "panicle_parameter_policy": "explicit_shared_abc_reproductive_presentation_separate_from_btx_vegetative",
+        "panicle_presentation": PANICLE_PRESENTATION,
+        "minimum_panicle_canopy_clearance_m": PANICLE_CANOPY_CLEARANCE_M,
         "relabel_markers": False,
         "ownership": "authoritative_measured_abc_field_with_shared_btx_vegetative_morphology",
         "basis": "Measured A/A/B/B/C/C 2026 field identities with the manual BTX descriptor reused for all vegetative growth",
@@ -192,6 +207,19 @@ def shared_target_gdd(paths: dict[str, Path]) -> float:
     return values[0]
 
 
+def maturity_floor_gdd(descriptor_target_gdd: float, records: list[object]) -> tuple[float, float]:
+    if not records:
+        raise ValueError("cannot calculate a maturity endpoint without plants")
+    maximum_organ_delay_gdd = max(
+        max(
+            float(record.vegetative_maturity_gdd),
+            float(record.panicle_initiation_gdd) + float(record.panicle_maturity_gdd),
+        )
+        for record in records
+    )
+    return descriptor_target_gdd + maximum_organ_delay_gdd, maximum_organ_delay_gdd
+
+
 def frame_path(output_dir: Path, state: int) -> Path:
     return output_dir / "frames" / (FRAME_PATTERN % state)
 
@@ -298,12 +326,41 @@ def summarize_phenology(
             "panicle_spikelet_count": sum(
                 int(record.panicle_spikelet_count) for record in group
             ),
+            "vegetative_mature_plants": sum(
+                bool(record.vegetative_organs_mature) for record in group
+            ),
+            "panicle_mature_plants": sum(bool(record.panicle_mature) for record in group),
+            "all_organs_mature_plants": sum(
+                bool(record.all_organs_mature) for record in group
+            ),
+            "immature_vegetative_organ_count": sum(
+                int(record.immature_vegetative_organ_count) for record in group
+            ),
+            "immature_panicle_organ_count": sum(
+                int(record.immature_panicle_organ_count) for record in group
+            ),
+            "developmental_module_count": sum(
+                int(record.developmental_module_count) for record in group
+            ),
+            "minimum_vegetative_growth_progress": min(
+                float(record.minimum_vegetative_growth_progress) for record in group
+            ),
+            "minimum_panicle_growth_progress": min(
+                float(record.minimum_panicle_growth_progress) for record in group
+            ),
             "mean_height_m": sum(float(record.plant_height_m) for record in group)
+            / len(group),
+            "mean_vegetative_canopy_height_m": sum(
+                float(record.vegetative_canopy_height_m) for record in group
+            )
             / len(group),
             "mean_panicle_tip_height_m": sum(
                 float(record.panicle_tip_height_m) for record in group
             )
             / len(group),
+            "minimum_panicle_canopy_clearance_m": min(
+                float(record.panicle_canopy_clearance_m) for record in group
+            ),
         }
     return summary
 
@@ -314,6 +371,36 @@ def validate_full_panicle_emergence(summary: dict[str, dict[str, float | int]]) 
     if plants != 60 or emerged != plants:
         raise RuntimeError(
             f"final-state panicle emergence failed: {emerged}/{plants}; required 60/60"
+        )
+
+
+def validate_full_organ_maturity(summary: dict[str, dict[str, float | int]]) -> None:
+    validate_full_panicle_emergence(summary)
+    plants = sum(int(row["plants"]) for row in summary.values())
+    vegetative = sum(int(row["vegetative_mature_plants"]) for row in summary.values())
+    panicles = sum(int(row["panicle_mature_plants"]) for row in summary.values())
+    complete = sum(int(row["all_organs_mature_plants"]) for row in summary.values())
+    if plants != 60 or vegetative != plants or panicles != plants or complete != plants:
+        raise RuntimeError(
+            "final-state organ maturity failed: "
+            f"vegetative {vegetative}/{plants}, panicle {panicles}/{plants}, "
+            f"whole-plant {complete}/{plants}; required 60/60 for each"
+        )
+
+
+def validate_full_panicle_visibility(
+    summary: dict[str, dict[str, float | int]],
+    minimum_clearance_m: float = PANICLE_CANOPY_CLEARANCE_M,
+) -> None:
+    failures = {
+        label: float(row["minimum_panicle_canopy_clearance_m"])
+        for label, row in summary.items()
+        if float(row["minimum_panicle_canopy_clearance_m"]) < minimum_clearance_m
+    }
+    if failures:
+        raise RuntimeError(
+            "final-state panicle visibility failed: "
+            f"minimum clearance {minimum_clearance_m:.3f} m required; observed {failures}"
         )
 
 
@@ -347,6 +434,21 @@ def initialize_field(
     }
     if int(evo.SetSorghumLsGenotypeDescriptors(asset_descriptors, False, -1)) != 60:
         raise RuntimeError("failed to assign the field descriptors")
+    presentation = profile.get("panicle_presentation")
+    if presentation and int(
+        evo.ConfigureSorghumLsPaniclePresentation(
+            presentation["peduncle_length_m"],
+            presentation["rachis_length_m"],
+            presentation["branch_length_m"],
+            presentation["primary_branch_count"],
+            presentation["spikelet_pairs_per_branch"],
+            presentation["spikelet_length_m"],
+            presentation["spikelet_radius_m"],
+            *presentation["immature_color"],
+            *presentation["mature_color"],
+        )
+    ) != 60:
+        raise RuntimeError("failed to apply the separate A/B/C panicle presentation")
     if (
         int(
             evo.ConfigureSorghumLsLeafMeshQuality(
@@ -380,9 +482,11 @@ def configure_camera(
     args: argparse.Namespace,
     descriptor_target_gdd: float,
     profile: dict[str, object],
-) -> tuple[dict[str, object], float, dict[str, dict[str, float | int]]]:
+) -> tuple[dict[str, object], float, float, float, dict[str, dict[str, float | int]]]:
     endpoint_gdd = descriptor_target_gdd
     first_evaluation = True
+    maturity_floor = descriptor_target_gdd
+    maximum_organ_delay_gdd = 0.0
     while endpoint_gdd <= descriptor_target_gdd * args.max_endpoint_multiplier + 1.0e-6:
         grow_to_gdd = (
             evo.GrowSorghumLsPlantsToGdd
@@ -396,25 +500,54 @@ def configure_camera(
             raise RuntimeError("final-state field did not become idle")
         records = list(evo.GetSorghumLsPlantSceneMetadata(True))
         validate_field(records, endpoint_gdd, profile, require_geometry=True)
+        maturity_floor, maximum_organ_delay_gdd = maturity_floor_gdd(
+            descriptor_target_gdd, records
+        )
         phenology = summarize_phenology(records, profile)
         write_json(
             args.output_dir / "endpoint_preflight.json",
-            {"gdd": endpoint_gdd, "phenology": phenology},
+            {
+                "gdd": endpoint_gdd,
+                "maturity_floor_gdd": maturity_floor,
+                "maximum_organ_delay_gdd": maximum_organ_delay_gdd,
+                "phenology": phenology,
+            },
         )
         try:
-            validate_full_panicle_emergence(phenology)
+            validate_full_organ_maturity(phenology)
+            if "minimum_panicle_canopy_clearance_m" in profile:
+                validate_full_panicle_visibility(
+                    phenology, float(profile["minimum_panicle_canopy_clearance_m"])
+                )
             break
         except RuntimeError:
-            endpoint_gdd += args.endpoint_gdd_step
+            endpoint_gdd = (
+                maturity_floor
+                if endpoint_gdd + 1.0e-6 < maturity_floor
+                else endpoint_gdd + args.endpoint_gdd_step
+            )
     else:
-        validate_full_panicle_emergence(phenology)
+        validate_full_organ_maturity(phenology)
+        if "minimum_panicle_canopy_clearance_m" in profile:
+            validate_full_panicle_visibility(
+                phenology, float(profile["minimum_panicle_canopy_clearance_m"])
+            )
     print(
-        json.dumps({"gdd": endpoint_gdd, "phenology": phenology}, sort_keys=True),
+        json.dumps(
+            {
+                "gdd": endpoint_gdd,
+                "maturity_floor_gdd": maturity_floor,
+                "maximum_organ_delay_gdd": maximum_organ_delay_gdd,
+                "phenology": phenology,
+            },
+            sort_keys=True,
+        ),
         flush=True,
     )
     camera = camera_for_view(
-        geometry_bounds(records), "perspective", args.width / args.height
+        geometry_bounds(records), args.camera_view, args.width / args.height
     )
+    camera["view"] = args.camera_view
     position, target, up = (evo.Vec3(), evo.Vec3(), evo.Vec3())
     for vector, values in zip(
         (position, target, up), (camera["position"], camera["target"], camera["up"])
@@ -422,7 +555,7 @@ def configure_camera(
         vector.x, vector.y, vector.z = values
     if not evo.SetMainCameraLookAt(position, target, up, float(camera["fov_degrees"])):
         raise RuntimeError("failed to apply the fixed 6x10 field camera")
-    return camera, endpoint_gdd, phenology
+    return camera, endpoint_gdd, maturity_floor, maximum_organ_delay_gdd, phenology
 
 
 def capture_state(
@@ -441,6 +574,8 @@ def capture_state(
         "state_count": args.state_count,
         "gdd": gdd,
         "target_gdd": target_gdd,
+        "camera_view": args.camera_view,
+        "panicle_parameter_policy": profile["panicle_parameter_policy"],
     }
     if valid_cached_state(metadata, frame, expected):
         payload = json.loads(metadata.read_text(encoding="utf-8"))
@@ -510,6 +645,8 @@ def verify_state_outputs(
             "state_count": args.state_count,
             "gdd": gdd,
             "target_gdd": target_gdd,
+            "camera_view": args.camera_view,
+            "panicle_parameter_policy": profile["panicle_parameter_policy"],
         }
         if not valid_cached_state(metadata, frame, expected):
             raise RuntimeError(f"invalid state output: {state}")
@@ -528,7 +665,12 @@ def verify_state_outputs(
             )
         rows.append(payload)
     if args.state_count in states:
-        validate_full_panicle_emergence(rows[-1]["phenology"])
+        validate_full_organ_maturity(rows[-1]["phenology"])
+        if "minimum_panicle_canopy_clearance_m" in profile:
+            validate_full_panicle_visibility(
+                rows[-1]["phenology"],
+                float(profile["minimum_panicle_canopy_clearance_m"]),
+            )
     return rows
 
 
@@ -627,6 +769,7 @@ def encode_videos(
 
 
 def run(args: argparse.Namespace) -> Path:
+    (args.output_dir / "failure.json").unlink(missing_ok=True)
     if args.state_count != STATE_COUNT:
         raise ValueError("the published 2026 timeline is fixed at 1,000 field states")
     if args.width <= 0 or args.height <= 0 or args.width % 2 or args.height % 2:
@@ -666,7 +809,7 @@ def run(args: argparse.Namespace) -> Path:
     # its manifest or assembled mobile video.
     try:
         initialize_field(evo, args, descriptors, profile)
-        camera, target_gdd, final_phenology = configure_camera(
+        camera, target_gdd, maturity_floor, maximum_organ_delay_gdd, final_phenology = configure_camera(
             evo, args, descriptor_target_gdd, profile
         )
         for offset, state in enumerate(states, start=1):
@@ -700,7 +843,7 @@ def run(args: argparse.Namespace) -> Path:
             encode_videos(args.output_dir, args, profile) if not args.no_video else []
         )
         report = {
-            "schema_version": 2,
+            "schema_version": 3,
             "renderer": "EvoEngine_OptiX",
             "basis": profile["basis"],
             "field_profile": args.field_profile,
@@ -716,13 +859,42 @@ def run(args: argparse.Namespace) -> Path:
             "descriptor_session": profile["descriptor_session"],
             "vegetative_descriptor_source": profile["vegetative_descriptor_source"],
             "panicle_parameter_policy": profile["panicle_parameter_policy"],
+            "panicle_presentation": profile.get("panicle_presentation"),
             "descriptor_target_gdd": descriptor_target_gdd,
             "timeline_end_gdd": target_gdd,
             "endpoint_extension_gdd": target_gdd - descriptor_target_gdd,
+            "maturity_floor_gdd": maturity_floor,
+            "maximum_organ_delay_gdd": maximum_organ_delay_gdd,
             "final_panicle_emergence": {
                 "required": 60,
                 "observed": sum(
                     int(row["panicle_emerged_plants"])
+                    for row in final_phenology.values()
+                ),
+                "status": "pass",
+                "by_label": final_phenology,
+            },
+            "final_organ_maturity": {
+                "required": 60,
+                "vegetative_observed": sum(
+                    int(row["vegetative_mature_plants"])
+                    for row in final_phenology.values()
+                ),
+                "panicle_observed": sum(
+                    int(row["panicle_mature_plants"])
+                    for row in final_phenology.values()
+                ),
+                "whole_plant_observed": sum(
+                    int(row["all_organs_mature_plants"])
+                    for row in final_phenology.values()
+                ),
+                "status": "pass",
+                "by_label": final_phenology,
+            },
+            "final_panicle_visibility": {
+                "minimum_required_canopy_clearance_m": PANICLE_CANOPY_CLEARANCE_M,
+                "minimum_observed_canopy_clearance_m": min(
+                    float(row["minimum_panicle_canopy_clearance_m"])
                     for row in final_phenology.values()
                 ),
                 "status": "pass",
@@ -800,6 +972,12 @@ def build_parser() -> argparse.ArgumentParser:
         "--field-profile", choices=FIELD_PROFILES, default=DEFAULT_FIELD_PROFILE
     )
     parser.add_argument(
+        "--camera-view",
+        choices=CAMERA_VIEWS,
+        default="perspective",
+        help="fixed lifecycle camera; the default shows mature, exserted panicles above the canopy",
+    )
+    parser.add_argument(
         "--output-dir",
         type=Path,
         default=root
@@ -817,7 +995,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--playback-fps", default=",".join(str(value) for value in PLAYBACK_FPS)
     )
     parser.add_argument("--endpoint-gdd-step", type=float, default=20.0)
-    parser.add_argument("--max-endpoint-multiplier", type=float, default=1.5)
+    parser.add_argument("--max-endpoint-multiplier", type=float, default=2.0)
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--bounces", type=int, default=2)
     parser.add_argument("--warmup-frames", type=int, default=1)
@@ -842,11 +1020,26 @@ def valid_worker_report(
         return None
     states = requested_states(args.states, args.state_count)
     final = report.get("final_panicle_emergence", {})
+    maturity = report.get("final_organ_maturity", {})
+    visibility = report.get("final_panicle_visibility", {})
+    required_clearance = profile.get("minimum_panicle_canopy_clearance_m")
     if (
         report.get("field_profile") != args.field_profile
         or report.get("captured_states") != list(states)
         or final.get("observed") != 60
         or final.get("status") != "pass"
+        or maturity.get("vegetative_observed") != 60
+        or maturity.get("panicle_observed") != 60
+        or maturity.get("whole_plant_observed") != 60
+        or maturity.get("status") != "pass"
+        or (
+            required_clearance is not None
+            and (
+                visibility.get("status") != "pass"
+                or float(visibility.get("minimum_observed_canopy_clearance_m", -1.0))
+                < float(required_clearance)
+            )
+        )
     ):
         return None
     try:

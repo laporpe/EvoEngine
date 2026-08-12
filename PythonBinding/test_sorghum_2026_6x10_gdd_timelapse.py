@@ -57,9 +57,10 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         )
         self.assertEqual(1, len(set(profile["descriptor_paths"].values())))
         self.assertEqual(
-            "native_defaults_unchanged_no_serialized_panicle_fields",
+            "explicit_shared_abc_reproductive_presentation_separate_from_btx_vegetative",
             profile["panicle_parameter_policy"],
         )
+        self.assertEqual(0.82, profile["panicle_presentation"]["peduncle_length_m"])
 
     def test_previous_measured_vegetative_profile_remains_separate(self) -> None:
         profile = TIMELAPSE.field_profile(TIMELAPSE.MEASURED_VEGETATIVE_FIELD_PROFILE)
@@ -90,6 +91,49 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         complete["GenotypeC"]["panicle_emerged_plants"] = 19
         with self.assertRaisesRegex(RuntimeError, "59/60"):
             TIMELAPSE.validate_full_panicle_emergence(complete)
+
+    def test_maturity_floor_adds_the_largest_sampled_organ_delay(self) -> None:
+        records = [
+            SimpleNamespace(
+                vegetative_maturity_gdd=240.0,
+                panicle_initiation_gdd=1.0,
+                panicle_maturity_gdd=260.0,
+            ),
+            SimpleNamespace(
+                vegetative_maturity_gdd=250.0,
+                panicle_initiation_gdd=2.0,
+                panicle_maturity_gdd=255.0,
+            ),
+        ]
+        endpoint, delay = TIMELAPSE.maturity_floor_gdd(660.0, records)
+        self.assertEqual(921.0, endpoint)
+        self.assertEqual(261.0, delay)
+
+    def test_final_organ_maturity_requires_all_sixty_plants(self) -> None:
+        complete = {
+            genotype: {
+                "plants": 20,
+                "panicle_emerged_plants": 20,
+                "vegetative_mature_plants": 20,
+                "panicle_mature_plants": 20,
+                "all_organs_mature_plants": 20,
+            }
+            for genotype in ("GenotypeA", "GenotypeB", "GenotypeC")
+        }
+        TIMELAPSE.validate_full_organ_maturity(complete)
+        complete["GenotypeC"]["panicle_mature_plants"] = 19
+        with self.assertRaisesRegex(RuntimeError, "panicle 59/60"):
+            TIMELAPSE.validate_full_organ_maturity(complete)
+
+    def test_final_panicle_visibility_requires_every_group_to_clear_canopy(self) -> None:
+        summary = {
+            genotype: {"minimum_panicle_canopy_clearance_m": 0.12}
+            for genotype in ("GenotypeA", "GenotypeB", "GenotypeC")
+        }
+        TIMELAPSE.validate_full_panicle_visibility(summary)
+        summary["GenotypeC"]["minimum_panicle_canopy_clearance_m"] = 0.04
+        with self.assertRaisesRegex(RuntimeError, "GenotypeC"):
+            TIMELAPSE.validate_full_panicle_visibility(summary)
 
     def test_pre_emergence_field_allows_records_without_geometry(self) -> None:
         profile = TIMELAPSE.field_profile(TIMELAPSE.DEFAULT_FIELD_PROFILE)

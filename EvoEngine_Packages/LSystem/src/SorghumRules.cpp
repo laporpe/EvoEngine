@@ -362,8 +362,8 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         Successor<SorghumModuleData> branch_successor;
         branch_successor.is_branch = true;
         SorghumPanicleBranch branch;
-        branch.attachment_fraction = (params.panicle_peduncle_length_m + t * params.panicle_rachis_length_m) /
-                                     rachis_total_length;
+        branch.attachment_fraction =
+            (params.panicle_peduncle_length_m + t * params.panicle_rachis_length_m) / rachis_total_length;
         branch.target_length = params.panicle_branch_length_m * envelope;
         branch.target_thickness = params.panicle_branch_radius_m * 2.0f * (0.80f + 0.20f * (1.0f - t));
         branch.branch_angle = params.panicle_branch_angle_degrees * (0.80f + 0.20f * (1.0f - t));
@@ -692,11 +692,16 @@ std::vector<SorghumRule> CreateSorghumGrowthRules(const SampledSorghumParams& pa
       const float maturity_gdd = std::max(1.0f, params.maturity_gdd);
       const float age_t =
           std::clamp(internode.age_gdd * std::max(1.0f, internode.development_rate_scale) / maturity_gdd, 0.0f, 1.0f);
+      const bool mature = age_t >= 1.0f - 1.0e-4f;
 
-      const float length_progress = EvaluatePlottedDeterministic(
-          params.internode_elongation_curve, age_t, internode.node_random, kInternodeElongationSalt, 0.0f, 1.0f);
-      const float thickness_progress = EvaluatePlottedDeterministic(
-          params.internode_thickness_curve, age_t, internode.node_random, kInternodeThicknessSalt, 0.0f, 1.0f);
+      const float length_progress =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.internode_elongation_curve, age_t, internode.node_random,
+                                                kInternodeElongationSalt, 0.0f, 1.0f);
+      const float thickness_progress =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.internode_thickness_curve, age_t, internode.node_random,
+                                                kInternodeThicknessSalt, 0.0f, 1.0f);
 
       internode.growth_progress = length_progress;
       internode.length = internode.target_length * length_progress;
@@ -735,25 +740,44 @@ std::vector<SorghumRule> CreateSorghumGrowthRules(const SampledSorghumParams& pa
       const float maturity_gdd = std::max(1.0f, params.maturity_gdd);
       const float age_t =
           std::clamp(leaf.age_gdd * std::max(1.0f, leaf.development_rate_scale) / maturity_gdd, 0.0f, 1.0f);
+      const bool mature = leaf.maturity_reached || age_t >= 1.0f - 1.0e-4f;
 
-      const float sheath_length_t = EvaluatePlottedDeterministic(
-          params.leaf_sheath_length_growth_curve, age_t, leaf.node_random, kLeafSheathLengthGrowthSalt, 0.0f, 1.0f);
-      const float neck_length_t = EvaluatePlottedDeterministic(params.leaf_neck_length_growth_curve, age_t,
-                                                               leaf.node_random, kLeafNeckLengthGrowthSalt, 0.0f, 1.0f);
-      const float blade_length_t = EvaluatePlottedDeterministic(params.leaf_blade_growth_curve, age_t, leaf.node_random,
-                                                                kLeafBladeGrowthSalt, 0.0f, 1.0f);
-      const float sheath_width_t = EvaluatePlottedDeterministic(
-          params.leaf_sheath_width_growth_curve, age_t, leaf.node_random, kLeafSheathWidthGrowthSalt, 0.0f, 1.0f);
-      const float neck_width_t = EvaluatePlottedDeterministic(params.leaf_neck_width_growth_curve, age_t,
-                                                              leaf.node_random, kLeafNeckWidthGrowthSalt, 0.0f, 1.0f);
-      const float blade_width_t = EvaluatePlottedDeterministic(params.leaf_width_growth_curve, age_t, leaf.node_random,
-                                                               kLeafWidthGrowthSalt, 0.0f, 1.0f);
-      const float angle_t = EvaluatePlottedDeterministic(params.leaf_angle_development_curve, age_t, leaf.node_random,
-                                                         kLeafAngleDevelopmentSalt, 0.0f, 1.0f);
-      const float curl_t = EvaluatePlottedDeterministic(params.leaf_curling_development_curve, age_t, leaf.node_random,
-                                                        kLeafCurlingDevelopmentSalt, 0.0f, 1.0f);
-      const float bend_t = EvaluatePlottedDeterministic(params.leaf_bending_development_curve, age_t, leaf.node_random,
-                                                        kLeafBendingDevelopmentSalt, 0.0f, 1.0f);
+      const float sheath_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_sheath_length_growth_curve, age_t, leaf.node_random,
+                                                kLeafSheathLengthGrowthSalt, 0.0f, 1.0f);
+      const float neck_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_neck_length_growth_curve, age_t, leaf.node_random,
+                                                kLeafNeckLengthGrowthSalt, 0.0f, 1.0f);
+      const float blade_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_blade_growth_curve, age_t, leaf.node_random,
+                                                kLeafBladeGrowthSalt, 0.0f, 1.0f);
+      const float sheath_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_sheath_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafSheathWidthGrowthSalt, 0.0f, 1.0f);
+      const float neck_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_neck_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafNeckWidthGrowthSalt, 0.0f, 1.0f);
+      const float blade_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafWidthGrowthSalt, 0.0f, 1.0f);
+      const float angle_t = mature
+                                ? 1.0f
+                                : EvaluatePlottedDeterministic(params.leaf_angle_development_curve, age_t,
+                                                               leaf.node_random, kLeafAngleDevelopmentSalt, 0.0f, 1.0f);
+      const float curl_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_curling_development_curve, age_t, leaf.node_random,
+                                                kLeafCurlingDevelopmentSalt, 0.0f, 1.0f);
+      const float bend_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_bending_development_curve, age_t, leaf.node_random,
+                                                kLeafBendingDevelopmentSalt, 0.0f, 1.0f);
 
       leaf.growth_progress = blade_length_t;
       leaf.sheath_length = leaf.target_sheath_length * sheath_length_t;

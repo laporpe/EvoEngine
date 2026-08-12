@@ -809,6 +809,8 @@ TEST(LSystemSorghumPanicle, MainApexEmitsFlagLeafAndTripleSpikelets) {
     const auto& node = graph.PeekNode(handle);
     if (node.data.Is<SorghumLeaf>()) {
       const auto& leaf = node.data.Get<SorghumLeaf>();
+      EXPECT_FLOAT_EQ(leaf.growth_progress, 1.0f);
+      EXPECT_FLOAT_EQ(leaf.blade_length, leaf.target_blade_length);
       if (!leaf.is_flag_leaf)
         continue;
       ++flag_leaf_count;
@@ -829,6 +831,10 @@ TEST(LSystemSorghumPanicle, MainApexEmitsFlagLeafAndTripleSpikelets) {
       pedicellate_count += node.data.Get<SorghumPanicleSpikelet>().pedicellate ? 1 : 0;
       ASSERT_GE(node.GetParentHandle(), 0);
       EXPECT_TRUE(graph.PeekNode(node.GetParentHandle()).data.Is<SorghumPanicleBranch>());
+    } else if (node.data.Is<SorghumInternode>()) {
+      const auto& internode = node.data.Get<SorghumInternode>();
+      EXPECT_FLOAT_EQ(internode.growth_progress, 1.0f);
+      EXPECT_FLOAT_EQ(internode.length, internode.target_length);
     }
   }
 
