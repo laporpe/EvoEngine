@@ -1,23 +1,49 @@
 {
-  "schema_version": 2,
-  "status": "authoritative_abc_btx_vegetative_full_lifecycle",
+  "schema_version": 3,
+  "status": "authoritative_abc_btx_vegetative_full_maturity_visible_panicles",
   "asset_commit": "3cd1b3dff720ff0fdf1e830285dc91728cb9f516",
-  "source_commit": "85b3efc1d11fc54c648556fcd8606f9b398fb390",
+  "source_commit": "5a57cb15b105c52802b83b12eb3e53b53f0c0b23",
   "field_profile": "abc-btx-vegetative",
   "field_identity": "measured_abc",
   "vegetative_descriptor_source": "ManualAssets/Descriptors/BTX.sorghumls",
-  "panicle_parameter_policy": "native_defaults_unchanged_no_serialized_panicle_fields",
+  "panicle_parameter_policy": "explicit_shared_abc_reproductive_presentation_separate_from_btx_vegetative",
+  "panicle_presentation": {
+    "peduncle_length_m": 0.82,
+    "rachis_length_m": 0.34,
+    "branch_length_m": 0.18,
+    "primary_branch_count": 20,
+    "spikelet_pairs_per_branch": 7,
+    "spikelet_length_m": 0.01,
+    "spikelet_radius_m": 0.0045,
+    "immature_color": [0.45, 0.62, 0.12],
+    "mature_color": [0.58, 0.20, 0.055]
+  },
   "renderer": "EvoEngine_OptiX",
+  "camera_view": "perspective",
   "resolution": [1920, 1080],
   "source_state_count": 1000,
   "descriptor_target_gdd": 660.0,
-  "timeline_end_gdd": 820.0,
-  "endpoint_extension_gdd": 160.0,
-  "final_panicle_emergence": "60/60",
+  "maturity_floor_gdd": 921.0,
+  "maximum_organ_delay_gdd": 261.0,
+  "timeline_end_gdd": 1081.0,
+  "endpoint_extension_gdd": 421.0,
+  "final_validation": {
+    "panicle_emergence": "60/60",
+    "vegetative_maturity": "60/60",
+    "panicle_maturity": "60/60",
+    "whole_plant_maturity": "60/60",
+    "developmental_modules_remaining": 0,
+    "minimum_vegetative_growth_progress": 1.0,
+    "minimum_panicle_growth_progress": 1.0,
+    "minimum_required_panicle_canopy_clearance_m": 0.08,
+    "minimum_observed_panicle_canopy_clearance_m": 0.11087048053741455,
+    "status": "pass"
+  },
   "worker_exit_status": 3221226505,
   "worker_teardown_validation": "accepted_by_parent_after_report_state_source_video_hash_validation",
-  "script_sha256": "A7B04E12DE9A16D151CE6A975D7FEEE002D260F3A6E350194D5058318D394C04",
-  "report_sha256": "95AC607A02544B9BA59897F965DFEC94995554B3146D3776D31161BB16C8A307",
+  "script_sha256": "E47B9E7E5A6C8FA49207B92AC754049706CEEFEADEF074963251CA29FA04D179",
+  "report_sha256": "3983857E93F31B950F1C04512CDA8D8DAA46A64A9658930418055F069DC9F926",
+  "final_state_sha256": "764F49165D7A66761CD4A32AFBF29B4B99ADD484BC0B7266C1B2B52AEEC84BB0",
   "source_sha256": {
     "project": "FB37BD6A55A82CB217FA3A69433450A9CC68E2734A7A993B19EEAE63D30AE0CA",
     "template_scene": "D6E08491B9F88E37F128397B454E471BB0A0EEDC2F1D6CA84146972AD855890B",
@@ -26,17 +52,17 @@
     "descriptor_GenotypeC": "C3BDDD0646BE3F94E11D2486AE72002A7EACA004667FFA5098915B58D8DB45B5"
   },
   "milestones": [
-    {"state": 1, "sha256": "30C935BFDCF105C4F35C848E5C38EC628436736155D4F2BB3EC814CCD8D744C6"},
-    {"state": 100, "sha256": "164E97D5B5070F070DEF7ED3EA4E2F888D3D82B8172B378B15F4C1837BCB7D69"},
-    {"state": 250, "sha256": "1AA839435AB28084F3F8F4B074CD7A1C1A60CBF3BAAA51DEEDE258E1340C5796"},
-    {"state": 500, "sha256": "42542B56C120C2ACD8626915EF68D045EBDCF865E0500C87874F0D937241FBFF"},
-    {"state": 750, "sha256": "2F534CB0A3EF6996C430A276E8B51DB13AD11F2735F97B28B878D0C40BDF5014"},
-    {"state": 1000, "sha256": "56FB600BE358E51B36550AF3254D5BBB3854F89344AD9A9BF1168080410B77BD"}
+    {"state": 1, "sha256": "A36880260438B83A4105E0814327D152046B07C4023C0C8D0707EF4CA5156E7B"},
+    {"state": 100, "sha256": "4C0139C9FA35B76F606D4964BEBADF7721634DF259910EF94E7022926EB9FA1A"},
+    {"state": 250, "sha256": "C3C3FA1629BE8BB11B811BF089B17F844DCCF94BD0E0DB025BB526166BB6E389"},
+    {"state": 500, "sha256": "BED25440227FAD8970FCC1BDF61A717156CBA0B242786E9179F5D145BE434AD0"},
+    {"state": 750, "sha256": "DC68D66ED81DF013F258F50DB6661E17F197B8542B78ED18A372D5C3CA8D6052"},
+    {"state": 1000, "sha256": "B84F38C0D508C06EF99FD10DF1D525718E630376BBE5A8A39BB84FF1A5C06FE2"}
   ],
   "videos": [
-    {"fps": 12, "duration_seconds": 83.333333, "sha256": "595E6AC70AE65F29B7975B57F3F83CCA8EEE0487A7C4D0E7D5664C451D6B2AC9"},
-    {"fps": 24, "duration_seconds": 41.666667, "sha256": "09FAEB6098E2930709E0555AE08F69A84C85A41668B8A1AB0D53779207A362B9"},
-    {"fps": 48, "duration_seconds": 20.833333, "sha256": "A03340A6598C958835AE652D201419CC7F11FD4680E724F7A7C0E2CC555C668F"}
+    {"fps": 12, "duration_seconds": 83.333333, "sha256": "5BB26156038C202C1D08D279A83CE923FFC3257D80D70F7C67816AE6A134D93A"},
+    {"fps": 24, "duration_seconds": 41.666667, "sha256": "E1E5563180FD5BCEFD00C89B4B88BDA56E1A46A29F0BEF55752A1D270FCEFD9E"},
+    {"fps": 48, "duration_seconds": 20.833333, "sha256": "5500716B016D39FF70BE0B77E328FA5CBEB5F87A4054754049F36111784ADC8F"}
   ],
-  "backup": "G:/My Drive/Sorghum/2026-08-12_6x10_ABC_BTX_Vegetative_Full_Lifecycle_Native_LSystem"
+  "backup": "G:/My Drive/Sorghum/2026-08-12_6x10_ABC_BTX_Vegetative_Full_Maturity_Visible_Panicles_1081GDD_Native_LSystem"
 }
