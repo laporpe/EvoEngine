@@ -2,9 +2,13 @@
 
 ## Authoritative field
 
-The authoritative panicle deliverable is the measured 2026 `GenotypeA`, `GenotypeB`, and `GenotypeC` field. It retains the experimental A,A,B,B,C,C row order and 20 plants per genotype. `PythonBinding/sorghum_2026_6x10_gdd_timelapse.py` reads the `MeasurementStage02` descriptors and renders 1,000 ordered SorghumLS states from 0.1% through 100% of the full-lifecycle GDD endpoint.
+The authoritative panicle deliverable retains the measured 2026 `GenotypeA`, `GenotypeB`, and `GenotypeC` identities, experimental A,A,B,B,C,C row order, and 20 plants per genotype. For this render revision, all three identities deliberately reuse `Assets/ManualAssets/Descriptors/BTX.sorghumls` for non-panicle growth. The A/B/C labels therefore express field ownership only; they do not imply distinct vegetative morphology in this deliverable.
+
+The descriptor files currently serialize no panicle-specific fields, so switching the vegetative source to BTX does not replace a measured A/B/C panicle parameter set. Native panicle defaults and the 60/60 emergence gate remain unchanged. The older Stage-2 A/B/C vegetative render is retained only as `abc-measured-vegetative-reference` and is superseded for presentation.
 
 The renderer performs a final-state engine preflight before capturing any frames. A deliverable is valid only when all 60 plants have `panicle_emerged=true`. It first tests the shared descriptor target, currently 660 GDD. If that endpoint is insufficient, it advances in 20-GDD steps up to 1.5 times the descriptor target and records the extension in the manifest. Failure to reach 60/60 aborts the render and video assembly.
+
+The frozen BTX-vegetative A/B/C render required an endpoint of 820 GDD, a 160-GDD extension. It passed at 20/20 plants for each of A, B, and C.
 
 The final output contains the same 1,000 source renders encoded at three playback time scales:
 
@@ -18,7 +22,7 @@ States 1, 100, 250, 500, 750, and 1000 are identified as milestone stills in the
 
 ## Scientific boundary
 
-The vegetative morphology and field ownership come from the measured A/B/C pipeline. The experiment did not measure genotype-specific reproductive architecture or dates of heading, anthesis, grain filling, or maturity. Native panicle structure and timing are therefore model outputs using the shared SorghumLS reproductive defaults, not observations of A/B/C reproductive differences.
+Field ownership comes from the measured A/B/C pipeline, while vegetative morphology is intentionally shared from the manual BTX descriptor. The experiment did not measure genotype-specific reproductive architecture or dates of heading, anthesis, grain filling, or maturity. Native panicle structure and timing are therefore model outputs using the shared SorghumLS reproductive defaults, not observations of A/B/C reproductive differences.
 
 The fixed PARBAR rigs and midday lighting are visual context only. No 2026 illumination or sensor measurement is inferred from this render.
 
@@ -42,8 +46,8 @@ python PythonBinding\sorghum_2026_6x10_gdd_timelapse.py `
   --output-dir out\panicle_timelapse\sorghum_2026_6x10_btx_pawaga_reference
 ```
 
-The authoritative output directory is `out/panicle_timelapse/sorghum_2026_6x10_abc_full_lifecycle_1000_native_1080p`. It contains 1,000 PNG frames, per-state JSON records, three verified H.264 videos, and `sorghum_2026_6x10_abc_full_lifecycle.json`.
+The authoritative output directory is `out/panicle_timelapse/sorghum_2026_6x10_abc_btx_vegetative_full_lifecycle_1000_native_1080p`. It contains 1,000 PNG frames, per-state JSON records, three verified H.264 videos, and `sorghum_2026_6x10_abc_btx_vegetative_full_lifecycle.json`.
 
-`docs/sorghum-2026-panicle-render-freeze.json` records the frozen source, milestone-frame, report, video, and asset-commit hashes. The portable deliverable is backed up under `G:/My Drive/Sorghum/2026-08-12_6x10_ABC_Full_Lifecycle_Native_LSystem`.
+`docs/sorghum-2026-panicle-render-freeze.json` records the frozen source, milestone-frame, report, video, and asset-commit hashes. The portable deliverable is backed up under `G:/My Drive/Sorghum/2026-08-12_6x10_ABC_BTX_Vegetative_Full_Lifecycle_Native_LSystem`.
 
 The older Blender generator is retained only as a presentation reference. Its synthetic boot, anthesis, grain-color, and A/B/C panicle-style animations are not the native SorghumLS deliverable.

@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -29,7 +31,7 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             TIMELAPSE.requested_states("0,1000", 1000)
 
-    def test_measured_abc_field_is_the_authoritative_default(self) -> None:
+    def test_abc_field_with_shared_btx_vegetative_morphology_is_default(self) -> None:
         profile = TIMELAPSE.field_profile(TIMELAPSE.DEFAULT_FIELD_PROFILE)
         self.assertEqual(("GenotypeA", "GenotypeB", "GenotypeC"), profile["labels"])
         self.assertEqual(
@@ -44,7 +46,27 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
             profile["row_labels"],
         )
         self.assertEqual(20, profile["plants_per_label"])
-        self.assertEqual("authoritative_measured_abc_field", profile["ownership"])
+        self.assertEqual(
+            "authoritative_measured_abc_field_with_shared_btx_vegetative_morphology",
+            profile["ownership"],
+        )
+        btx = Path("ManualAssets/Descriptors/BTX.sorghumls")
+        self.assertEqual(
+            {genotype: btx for genotype in profile["labels"]},
+            profile["descriptor_paths"],
+        )
+        self.assertEqual(1, len(set(profile["descriptor_paths"].values())))
+        self.assertEqual(
+            "native_defaults_unchanged_no_serialized_panicle_fields",
+            profile["panicle_parameter_policy"],
+        )
+
+    def test_previous_measured_vegetative_profile_remains_separate(self) -> None:
+        profile = TIMELAPSE.field_profile(TIMELAPSE.MEASURED_VEGETATIVE_FIELD_PROFILE)
+        self.assertEqual(
+            "superseded_measured_abc_vegetative_reference", profile["ownership"]
+        )
+        self.assertEqual(3, len(set(profile["descriptor_paths"].values())))
 
     def test_btx_pawaga_is_an_explicit_reference_profile(self) -> None:
         profile = TIMELAPSE.field_profile(TIMELAPSE.REFERENCE_FIELD_PROFILE)
@@ -68,6 +90,52 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         complete["GenotypeC"]["panicle_emerged_plants"] = 19
         with self.assertRaisesRegex(RuntimeError, "59/60"):
             TIMELAPSE.validate_full_panicle_emergence(complete)
+
+    def test_pre_emergence_field_allows_records_without_geometry(self) -> None:
+        profile = TIMELAPSE.field_profile(TIMELAPSE.DEFAULT_FIELD_PROFILE)
+        records = []
+        for row_index, cultivar in enumerate(profile["row_labels"]):
+            for column_index in range(10):
+                records.append(
+                    SimpleNamespace(
+                        cultivar=cultivar,
+                        evaluation_gdd=0.66,
+                        has_geometry=False,
+                        name=(f"{cultivar}_LSystem_R{row_index}_C{column_index}"),
+                    )
+                )
+
+        TIMELAPSE.validate_field(records, 0.66, profile)
+        with self.assertRaisesRegex(RuntimeError, "rendered geometry"):
+            TIMELAPSE.validate_field(records, 0.66, profile, require_geometry=True)
+
+    def test_runtime_asset_restoration_reverts_engine_side_effects(self) -> None:
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            assets = root / "Assets"
+            metadata = assets / "Descriptors" / "source.evefoldermeta"
+            project = root / "test.eveproj"
+            existing_side_effect = assets / "New Scene.evescene"
+            metadata.parent.mkdir(parents=True)
+            metadata.write_bytes(b"metadata\n")
+            project.write_bytes(b"project\r\n")
+            existing_side_effect.write_bytes(b"keep\n")
+            snapshot = TIMELAPSE.runtime_asset_snapshot(root, project)
+
+            metadata.unlink()
+            project.write_bytes(b"project\n")
+            new_side_effect = assets / "New Scene 1.evescene"
+            new_side_effect.write_bytes(b"remove\n")
+            TIMELAPSE.restore_runtime_assets(snapshot, root, {existing_side_effect})
+
+            self.assertEqual(b"metadata\n", metadata.read_bytes())
+            self.assertEqual(b"project\r\n", project.read_bytes())
+            self.assertTrue(existing_side_effect.is_file())
+            self.assertFalse(new_side_effect.exists())
+
+    def test_worker_flag_is_internal_and_defaults_off(self) -> None:
+        args = TIMELAPSE.build_parser().parse_args([])
+        self.assertFalse(args.worker)
 
 
 if __name__ == "__main__":

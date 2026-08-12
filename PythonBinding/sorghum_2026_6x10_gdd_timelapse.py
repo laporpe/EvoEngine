@@ -4,11 +4,15 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
 import shutil
 import subprocess
+import sys
+import time
+import traceback
 from collections import Counter
 from pathlib import Path
 
@@ -39,7 +43,8 @@ FRAME_PATTERN = "field_%04d.png"
 DESCRIPTOR_SESSION = "MeasurementStage02"
 FIELD_LEAF_VERTICAL_SUBDIVISION_M = 0.04
 FIELD_LEAF_HORIZONTAL_SUBDIVISIONS = 3
-DEFAULT_FIELD_PROFILE = "abc"
+DEFAULT_FIELD_PROFILE = "abc-btx-vegetative"
+MEASURED_VEGETATIVE_FIELD_PROFILE = "abc-measured-vegetative-reference"
 REFERENCE_FIELD_PROFILE = "btx-pawaga-reference"
 PLAYBACK_FPS = (12, 24, 48)
 MILESTONE_STATES = (1, 100, 250, 500, 750, 1000)
@@ -56,15 +61,45 @@ FIELD_PROFILES = {
             for index, genotype in enumerate(GENOTYPES)
         ),
         "plants_per_label": 20,
-        "descriptor_root": Path("GeneratedAssets/Experiments")
-        / EXPERIMENT_ID
-        / "Descriptors"
-        / DESCRIPTOR_SESSION,
-        "descriptor_session": DESCRIPTOR_SESSION,
+        "descriptor_paths": {
+            genotype: Path("ManualAssets/Descriptors/BTX.sorghumls")
+            for genotype in GENOTYPES
+        },
+        "descriptor_session": "manual_btx_vegetative_reuse",
+        "vegetative_descriptor_source": "ManualAssets/Descriptors/BTX.sorghumls",
+        "panicle_parameter_policy": "native_defaults_unchanged_no_serialized_panicle_fields",
         "relabel_markers": False,
-        "ownership": "authoritative_measured_abc_field",
-        "basis": "Measured A/A/B/B/C/C 2026 marker scene instantiated as 60 SorghumLS plants",
-        "slug": "abc",
+        "ownership": "authoritative_measured_abc_field_with_shared_btx_vegetative_morphology",
+        "basis": "Measured A/A/B/B/C/C 2026 field identities with the manual BTX descriptor reused for all vegetative growth",
+        "slug": "abc_btx_vegetative",
+    },
+    MEASURED_VEGETATIVE_FIELD_PROFILE: {
+        "labels": GENOTYPES,
+        "row_labels": ROW_GENOTYPES,
+        "plots": tuple(
+            {
+                "plot": index + 1,
+                "rows": (index * 2, index * 2 + 1),
+                "genotype": genotype,
+            }
+            for index, genotype in enumerate(GENOTYPES)
+        ),
+        "plants_per_label": 20,
+        "descriptor_paths": {
+            genotype: Path("GeneratedAssets/Experiments")
+            / EXPERIMENT_ID
+            / "Descriptors"
+            / DESCRIPTOR_SESSION
+            / f"{genotype}.sorghumls"
+            for genotype in GENOTYPES
+        },
+        "descriptor_session": DESCRIPTOR_SESSION,
+        "vegetative_descriptor_source": "measured_stage2_per_genotype_descriptors",
+        "panicle_parameter_policy": "native_defaults_unchanged_no_serialized_panicle_fields",
+        "relabel_markers": False,
+        "ownership": "superseded_measured_abc_vegetative_reference",
+        "basis": "Measured A/A/B/B/C/C 2026 marker scene instantiated with the Stage-2 A/B/C descriptors",
+        "slug": "abc_measured_vegetative_reference",
     },
     REFERENCE_FIELD_PROFILE: {
         "labels": ("BTX", "Pawaga"),
@@ -75,8 +110,13 @@ FIELD_PROFILES = {
             {"plot": 3, "rows": (4, 5), "cultivars": ("BTX", "Pawaga")},
         ),
         "plants_per_label": 30,
-        "descriptor_root": Path("ManualAssets/Descriptors"),
+        "descriptor_paths": {
+            cultivar: Path("ManualAssets/Descriptors") / f"{cultivar}.sorghumls"
+            for cultivar in ("BTX", "Pawaga")
+        },
         "descriptor_session": "manual_reference_descriptors",
+        "vegetative_descriptor_source": "manual_per_cultivar_reference_descriptors",
+        "panicle_parameter_policy": "native_defaults_unchanged_no_serialized_panicle_fields",
         "relabel_markers": True,
         "ownership": "reference_demonstration_not_the_measured_abc_field",
         "basis": "2026 marker positions relabeled as a 30/30 BTx/Pawaga reference demonstration",
@@ -122,8 +162,10 @@ def playback_rates(value: str | None) -> tuple[int, ...]:
 
 
 def descriptor_paths(project_root: Path, profile: dict[str, object]) -> dict[str, Path]:
-    root = project_root / "Assets" / Path(str(profile["descriptor_root"]))
-    paths = {label: root / f"{label}.sorghumls" for label in profile["labels"]}
+    paths = {
+        label: project_root / "Assets" / relative
+        for label, relative in profile["descriptor_paths"].items()
+    }
     if any(not path.is_file() for path in paths.values()):
         raise FileNotFoundError(
             f"missing descriptor asset for field profile {profile['slug']}"
@@ -165,6 +207,29 @@ def write_json(path: Path, payload: dict[str, object]) -> None:
     temporary.replace(path)
 
 
+def normalized_text_sha256(path: Path) -> str:
+    """Hash text semantically so engine-only newline rewrites do not fail provenance."""
+    normalized = path.read_text(encoding="utf-8").replace("\r\n", "\n")
+    return hashlib.sha256(normalized.encode("utf-8")).hexdigest().upper()
+
+
+def runtime_asset_snapshot(project_root: Path, project: Path) -> dict[Path, bytes]:
+    metadata = (project_root / "Assets").rglob("*.evefoldermeta")
+    return {path: path.read_bytes() for path in (project, *metadata)}
+
+
+def restore_runtime_assets(
+    snapshot: dict[Path, bytes], project_root: Path, initial_side_effects: set[Path]
+) -> None:
+    assets = project_root / "Assets"
+    for path in set(assets.glob("New Scene*.evescene*")) - initial_side_effects:
+        path.unlink(missing_ok=True)
+    for path, content in snapshot.items():
+        if not path.is_file() or path.read_bytes() != content:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_bytes(content)
+
+
 def valid_cached_state(path: Path, frame: Path, expected: dict[str, object]) -> bool:
     if not path.is_file() or not frame.is_file():
         return False
@@ -178,10 +243,16 @@ def valid_cached_state(path: Path, frame: Path, expected: dict[str, object]) -> 
 
 
 def validate_field(
-    records: list[object], expected_gdd: float, profile: dict[str, object]
+    records: list[object],
+    expected_gdd: float,
+    profile: dict[str, object],
+    *,
+    require_geometry: bool = False,
 ) -> None:
-    if len(records) != 60 or any(not record.has_geometry for record in records):
-        raise RuntimeError("expected a rendered 60-plant field")
+    if len(records) != 60:
+        raise RuntimeError("expected a 60-plant field")
+    if require_geometry and any(not record.has_geometry for record in records):
+        raise RuntimeError("expected all 60 plants to have rendered geometry")
     observed = Counter(str(record.cultivar) for record in records)
     expected = Counter(
         {label: profile["plants_per_label"] for label in profile["labels"]}
@@ -289,7 +360,11 @@ def initialize_field(
         != 60
     ):
         raise RuntimeError("failed to apply the render-only SorghumLS field leaf LOD")
-    if int(evo.SetSorghumLsFinalizeSnapshotMorphology(False)) != len(profile["labels"]):
+    unique_descriptor_count = len(set(descriptors.values()))
+    if (
+        int(evo.SetSorghumLsFinalizeSnapshotMorphology(False))
+        != unique_descriptor_count
+    ):
         raise RuntimeError(
             "failed to disable static-snapshot finalization for the dynamic GDD timeline"
         )
@@ -307,21 +382,25 @@ def configure_camera(
     profile: dict[str, object],
 ) -> tuple[dict[str, object], float, dict[str, dict[str, float | int]]]:
     endpoint_gdd = descriptor_target_gdd
+    first_evaluation = True
     while endpoint_gdd <= descriptor_target_gdd * args.max_endpoint_multiplier + 1.0e-6:
-        if (
-            int(
-                evo.GrowSorghumLsPlantsToGdd(
-                    endpoint_gdd, SEEDS[DESCRIPTOR_SESSION], True
-                )
-            )
-            != 60
-        ):
+        grow_to_gdd = (
+            evo.GrowSorghumLsPlantsToGdd
+            if first_evaluation
+            else evo.AdvanceSorghumLsPlantsToGdd
+        )
+        if int(grow_to_gdd(endpoint_gdd, SEEDS[DESCRIPTOR_SESSION], True)) != 60:
             raise RuntimeError("failed to generate the final-state SorghumLS field")
+        first_evaluation = False
         if not evo.WaitForProjectIdle(args.max_wait_frames):
             raise RuntimeError("final-state field did not become idle")
         records = list(evo.GetSorghumLsPlantSceneMetadata(True))
-        validate_field(records, endpoint_gdd, profile)
+        validate_field(records, endpoint_gdd, profile, require_geometry=True)
         phenology = summarize_phenology(records, profile)
+        write_json(
+            args.output_dir / "endpoint_preflight.json",
+            {"gdd": endpoint_gdd, "phenology": phenology},
+        )
         try:
             validate_full_panicle_emergence(phenology)
             break
@@ -381,6 +460,7 @@ def capture_state(
     raw = frame.with_name(f".{frame.stem}.raw.png")
     graded = frame.with_name(f".{frame.stem}.graded.png")
     frame.parent.mkdir(parents=True, exist_ok=True)
+    capture_succeeded = False
     try:
         if not evo.CaptureCurrentSceneRayTraced(
             args.width,
@@ -396,9 +476,11 @@ def capture_state(
         if metrics["luminance_stddev"] < 3.0:
             raise RuntimeError(f"state {state}: render appears blank or flat")
         graded.replace(frame)
+        capture_succeeded = True
     finally:
-        raw.unlink(missing_ok=True)
-        graded.unlink(missing_ok=True)
+        if capture_succeeded:
+            raw.unlink(missing_ok=True)
+            graded.unlink(missing_ok=True)
     payload = {
         **expected,
         "field_profile": profile["slug"],
@@ -568,6 +650,11 @@ def run(args: argparse.Namespace) -> Path:
             for genotype, path in descriptors.items()
         },
     }
+    source_semantic_hashes = {"project": normalized_text_sha256(args.project)}
+    asset_snapshot = runtime_asset_snapshot(args.project_root, args.project)
+    initial_side_effects = set(
+        (args.project_root / "Assets").glob("New Scene*.evescene*")
+    )
     build_dir = args.build_dir.resolve()
     configure_engine_imports(build_dir, args.config)
     os.chdir(build_dir / "PythonBinding" / args.config)
@@ -601,7 +688,11 @@ def run(args: argparse.Namespace) -> Path:
                     else descriptors[name.removeprefix("descriptor_")]
                 )
             )
-            if sha256(source) != digest:
+            actual = (
+                normalized_text_sha256(source) if name == "project" else sha256(source)
+            )
+            expected = source_semantic_hashes.get(name, digest)
+            if actual != expected:
                 raise RuntimeError(
                     f"rendering changed a scientific source asset: {source}"
                 )
@@ -623,6 +714,8 @@ def run(args: argparse.Namespace) -> Path:
                 "plants_per_label": profile["plants_per_label"],
             },
             "descriptor_session": profile["descriptor_session"],
+            "vegetative_descriptor_source": profile["vegetative_descriptor_source"],
+            "panicle_parameter_policy": profile["panicle_parameter_policy"],
             "descriptor_target_gdd": descriptor_target_gdd,
             "timeline_end_gdd": target_gdd,
             "endpoint_extension_gdd": target_gdd - descriptor_target_gdd,
@@ -663,6 +756,7 @@ def run(args: argparse.Namespace) -> Path:
             ],
             "states": rows,
             "source_sha256": source_hashes,
+            "source_semantic_sha256": source_semantic_hashes,
             "scientific_scene_assets_modified": False,
             "videos": videos,
         }
@@ -671,9 +765,19 @@ def run(args: argparse.Namespace) -> Path:
         )
         write_json(report_path, report)
         return report_path
+    except Exception as error:
+        write_json(
+            args.output_dir / "failure.json",
+            {
+                "error_type": type(error).__name__,
+                "error": str(error),
+                "traceback": traceback.format_exc(),
+            },
+        )
+        raise
     finally:
         set_ground_extension(evo, False)
-        evo.Terminate()
+        restore_runtime_assets(asset_snapshot, args.project_root, initial_side_effects)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -699,7 +803,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--output-dir",
         type=Path,
         default=root
-        / "out/panicle_timelapse/sorghum_2026_6x10_abc_full_lifecycle_1000_native_1080p",
+        / "out/panicle_timelapse/sorghum_2026_6x10_abc_btx_vegetative_full_lifecycle_1000_native_1080p",
     )
     parser.add_argument("--state-count", type=int, default=STATE_COUNT)
     parser.add_argument(
@@ -719,7 +823,62 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--warmup-frames", type=int, default=1)
     parser.add_argument("--max-wait-frames", type=int, default=30000)
     parser.add_argument("--no-video", action="store_true")
+    parser.add_argument("--worker", action="store_true", help=argparse.SUPPRESS)
     return parser
+
+
+def valid_worker_report(
+    args: argparse.Namespace, started_at: float
+) -> tuple[Path, dict[str, object]] | None:
+    profile = field_profile(args.field_profile)
+    report_path = (
+        args.output_dir / f"sorghum_2026_6x10_{profile['slug']}_full_lifecycle.json"
+    )
+    if not report_path.is_file() or report_path.stat().st_mtime < started_at - 1.0:
+        return None
+    try:
+        report = json.loads(report_path.read_text(encoding="utf-8"))
+    except (OSError, TypeError, ValueError, json.JSONDecodeError):
+        return None
+    states = requested_states(args.states, args.state_count)
+    final = report.get("final_panicle_emergence", {})
+    if (
+        report.get("field_profile") != args.field_profile
+        or report.get("captured_states") != list(states)
+        or final.get("observed") != 60
+        or final.get("status") != "pass"
+    ):
+        return None
+    try:
+        verify_state_outputs(
+            args.output_dir,
+            states,
+            args,
+            float(report["timeline_end_gdd"]),
+            profile,
+        )
+        descriptors = descriptor_paths(args.project_root, profile)
+        sources = {
+            "project": args.project,
+            "template_scene": args.project_root / "Assets" / TEMPLATE_SCENE,
+            **{f"descriptor_{label}": path for label, path in descriptors.items()},
+        }
+        if any(
+            sha256(path) != report.get("source_sha256", {}).get(name)
+            for name, path in sources.items()
+        ):
+            return None
+    except (KeyError, OSError, TypeError, ValueError, RuntimeError):
+        return None
+    videos = report.get("videos", [])
+    if not args.no_video and {
+        int(video.get("fps", -1))
+        for video in videos
+        if Path(str(video.get("path", ""))).is_file()
+        and sha256(Path(str(video["path"]))) == video.get("sha256")
+    } != set(playback_rates(args.playback_fps)):
+        return None
+    return report_path, report
 
 
 def main() -> None:
@@ -729,7 +888,38 @@ def main() -> None:
     args.build_dir = args.build_dir.resolve()
     args.runtime_package_dir = args.runtime_package_dir.resolve()
     args.output_dir = args.output_dir.resolve()
-    print(run(args))
+    if args.worker:
+        print(run(args))
+        sys.stdout.flush()
+        sys.stderr.flush()
+        return
+
+    asset_snapshot = runtime_asset_snapshot(args.project_root, args.project)
+    initial_side_effects = set(
+        (args.project_root / "Assets").glob("New Scene*.evescene*")
+    )
+    started_at = time.time()
+    try:
+        completed = subprocess.run(
+            [sys.executable, str(Path(__file__).resolve()), "--worker", *sys.argv[1:]],
+            check=False,
+        )
+    finally:
+        restore_runtime_assets(asset_snapshot, args.project_root, initial_side_effects)
+    result = valid_worker_report(args, started_at)
+    if result is None:
+        raise RuntimeError(
+            f"native render worker exited {completed.returncode} without a valid report"
+        )
+    report_path, report = result
+    report["worker_exit_status"] = completed.returncode
+    if completed.returncode:
+        report["worker_teardown_warning"] = (
+            "OptiX worker exited after the completed report was flushed; all states, "
+            "panicles, source hashes, and videos were validated by the parent process."
+        )
+    write_json(report_path, report)
+    print(report_path.resolve())
 
 
 if __name__ == "__main__":
