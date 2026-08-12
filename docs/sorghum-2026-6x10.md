@@ -28,6 +28,10 @@ Leaf midrib curvature was not measured. The generated descriptors therefore use 
 The resource submodule owns all generated experiment assets and provenance:
 
 - `Data/Experiments/Sorghum2026_6x10/`: normalized long tables, cell-level source references, QC, descriptor targets, the validation contract, exact 2021 baseline, scene manifest, and engine-validation reports.
+
+## Full-lifecycle panicle deliverable
+
+The measured A/A/B/B/C/C field is the authoritative full-lifecycle render. It uses the Stage-2 A/B/C descriptors, preserves 20 plants per genotype, and requires 60/60 final-state panicle emergence before any video is accepted. The same 1,000 GDD-indexed native renders are delivered at 12, 24, and 48 fps for slow study, standard review, and fast overview. BTx/Pawaga is maintained only as an explicitly labeled reference demonstration and is not interchangeable with the measured 2026 field. See `docs/sorghum-2026-panicle-timelapse.md` for the execution and validation contract.
 - `Assets/GeneratedAssets/Experiments/Sorghum2026_6x10/Descriptors/`: six descriptor assets, one per genotype and measurement session.
 - `Assets/ManualAssets/Scenes/Sorghum_6x10_2026.evescene`: reusable 60-marker template with soil and one three-bar PARBAR rig per genotype block.
 - `Assets/GeneratedAssets/Experiments/Sorghum2026_6x10/Scenes/`: two persisted descriptor-driven scenes.
