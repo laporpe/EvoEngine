@@ -1418,7 +1418,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("sun_intensity") = 1.0f, py::arg("sun_color") = glm::vec3(1.0f), py::arg("skylight_intensity") = 1.0f,
         py::arg("ambient_light_intensity") = 0.1f, py::arg("gamma") = 2.2f);
   m.def("CaptureCurrentSceneRayTraced", &CaptureCurrentSceneRayTraced, py::arg("resolution_x"), py::arg("resolution_y"),
-        py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f);
+        py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f,
+        py::arg("denoiser_strength") = 0.0f);
   m.def("ConfigurePresentationGroundExtension", &ConfigurePresentationGroundExtension, py::arg("enabled"),
         py::arg("size_m") = 160.0f, py::arg("texture_repeat_m") = 2.0f, py::arg("grid_spacing_m") = 1.0f);
   m.def("GetRayTracerBuildCounters", &GetRayTracerBuildCounters);
@@ -2199,9 +2200,11 @@ bool PyDigitalAgriculture::ConfigureRayTracerSkydome(const glm::vec3 sun_angles_
 
 bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, const int resolution_y,
                                                         const std::filesystem::path& output_path, const int samples,
-                                                        const int bounces, const float gamma) {
+                                                        const int bounces, const float gamma,
+                                                        const float denoiser_strength) {
 #  ifdef CUDA_MODULE_SERVICE
-  if (resolution_x <= 0 || resolution_y <= 0 || samples <= 0 || bounces < 0 || gamma <= 0.0f) {
+  if (resolution_x <= 0 || resolution_y <= 0 || samples <= 0 || bounces < 0 || gamma <= 0.0f ||
+      !std::isfinite(denoiser_strength) || denoiser_strength < 0.0f || denoiser_strength > 1.0f) {
     return false;
   }
   auto& application = ApplicationContext::Get();
@@ -2232,6 +2235,7 @@ bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, 
   camera->ray_properties.samples = samples;
   camera->ray_properties.bounces = bounces;
   camera->SetGamma(gamma);
+  camera->SetDenoiserStrength(denoiser_strength);
   camera->Render(camera->ray_properties, layer->environment_properties);
 
   if (const auto parent = output_path.parent_path(); !parent.empty()) {

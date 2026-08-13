@@ -69,6 +69,19 @@ class Sorghum2026GddTimelapseTest(unittest.TestCase):
         )
         self.assertEqual(3, len(set(profile["descriptor_paths"].values())))
 
+    def test_compact_panicle_profile_preserves_btx_vegetative_source(self) -> None:
+        profile = TIMELAPSE.field_profile(TIMELAPSE.COMPACT_PANICLE_FIELD_PROFILE)
+        compact = profile["panicle_presentation"]
+        standard = TIMELAPSE.PANICLE_PRESENTATION
+        self.assertEqual(1, len(set(profile["descriptor_paths"].values())))
+        self.assertLess(compact["rachis_length_m"], standard["rachis_length_m"])
+        self.assertLess(compact["branch_length_m"], standard["branch_length_m"])
+        self.assertGreater(
+            compact["primary_branch_count"] * compact["spikelet_pairs_per_branch"],
+            standard["primary_branch_count"]
+            * standard["spikelet_pairs_per_branch"],
+        )
+
     def test_btx_pawaga_is_an_explicit_reference_profile(self) -> None:
         profile = TIMELAPSE.field_profile(TIMELAPSE.REFERENCE_FIELD_PROFILE)
         self.assertEqual(("BTX", "Pawaga"), profile["labels"])

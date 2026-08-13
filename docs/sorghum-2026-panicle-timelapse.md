@@ -20,6 +20,14 @@ The final output contains the same 1,000 source renders encoded at three playbac
 
 States 1, 100, 250, 500, 750, and 1000 are identified as milestone stills in the manifest. All encodings span the complete GDD lifetime; playback speed does not change the biological state mapping.
 
+## Compact 4K presentation revision
+
+The compact-panicle revision uses the separate `abc-btx-vegetative-compact-panicle` profile. It preserves the measured A/A/B/B/C/C field identities, the shared BTX vegetative descriptor, the 1,000-state 1081-GDD lifetime, and all final-state validation rules. It changes only the shared reproductive presentation: 0.90 m peduncle, 0.26 m rachis, 0.11 m primary-branch envelope, 22 primary branches, eight spikelet pairs per branch, 0.009 m spikelet length, and 0.005 m spikelet radius. These compact-head values are presentation/model parameters, not measured A/B/C traits.
+
+The production revision was rendered at 3840x2160 with four samples per pixel, two ray bounces, and OptiX denoiser strength 1.0. It passed 60/60 panicle emergence, 60/60 vegetative maturity, 60/60 panicle maturity, 60/60 whole-plant maturity, and the 0.08 m minimum panicle-canopy clearance rule. The observed minimum clearance was 0.084 m.
+
+The compact 4K artifact is stored separately at `out/panicle_timelapse/sorghum_2026_6x10_abc_btx_vegetative_compact_panicle_full_lifecycle_1000_native_4k_denoised`; it does not overwrite the earlier 1080p baseline. `docs/sorghum-2026-compact-panicle-4k-render-freeze.json` records its frozen hashes and `G:/My Drive/Sorghum/2026-08-13_6x10_ABC_BTX_Vegetative_Compact_Panicles_4K_Denoised_1081GDD_Native_LSystem` is the hash-matched portable backup.
+
 ## Scientific boundary
 
 Field ownership comes from the measured A/B/C pipeline, while vegetative morphology is intentionally shared from the manual BTX descriptor. The experiment did not measure genotype-specific reproductive architecture or dates of heading, anthesis, grain filling, or maturity. The shared A/B/C panicle structure, exsertion, color, and timing are therefore explicit SorghumLS model outputs, not observations of reproductive differences between A, B, and C.
@@ -36,6 +44,16 @@ Authoritative A/B/C deliverable:
 
 ```powershell
 python PythonBinding\sorghum_2026_6x10_gdd_timelapse.py
+```
+
+Compact 4K A/B/C presentation revision:
+
+```powershell
+python PythonBinding\sorghum_2026_6x10_gdd_timelapse.py `
+  --field-profile abc-btx-vegetative-compact-panicle `
+  --output-dir out\panicle_timelapse\sorghum_2026_6x10_abc_btx_vegetative_compact_panicle_full_lifecycle_1000_native_4k_denoised `
+  --width 3840 --height 2160 --samples 4 --bounces 2 `
+  --denoiser-strength 1.0
 ```
 
 Optional BTx/Pawaga reference demonstration:

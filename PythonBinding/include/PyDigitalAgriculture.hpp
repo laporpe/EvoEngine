@@ -315,7 +315,8 @@ class PyDigitalAgriculture {
                                         float ambient_light_intensity = 0.1f, float gamma = 2.2f);
 
   static bool CaptureCurrentSceneRayTraced(int resolution_x, int resolution_y, const std::filesystem::path& output_path,
-                                           int samples = 64, int bounces = 4, float gamma = 2.2f);
+                                           int samples = 64, int bounces = 4, float gamma = 2.2f,
+                                           float denoiser_strength = 0.0f);
 
   static size_t ConfigurePresentationGroundExtension(bool enabled, float size_m = 160.0f, float texture_repeat_m = 2.0f,
                                                      float grid_spacing_m = 1.0f);

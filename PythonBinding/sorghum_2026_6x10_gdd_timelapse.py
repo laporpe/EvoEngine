@@ -55,7 +55,19 @@ PANICLE_PRESENTATION = {
     "immature_color": (0.45, 0.62, 0.12),
     "mature_color": (0.58, 0.20, 0.055),
 }
+COMPACT_PANICLE_PRESENTATION = {
+    "peduncle_length_m": 0.90,
+    "rachis_length_m": 0.26,
+    "branch_length_m": 0.11,
+    "primary_branch_count": 22,
+    "spikelet_pairs_per_branch": 8,
+    "spikelet_length_m": 0.009,
+    "spikelet_radius_m": 0.005,
+    "immature_color": (0.45, 0.62, 0.12),
+    "mature_color": (0.58, 0.20, 0.055),
+}
 DEFAULT_FIELD_PROFILE = "abc-btx-vegetative"
+COMPACT_PANICLE_FIELD_PROFILE = "abc-btx-vegetative-compact-panicle"
 MEASURED_VEGETATIVE_FIELD_PROFILE = "abc-measured-vegetative-reference"
 REFERENCE_FIELD_PROFILE = "btx-pawaga-reference"
 CAMERA_VIEWS = ("perspective", "near_top_down")
@@ -87,6 +99,32 @@ FIELD_PROFILES = {
         "ownership": "authoritative_measured_abc_field_with_shared_btx_vegetative_morphology",
         "basis": "Measured A/A/B/B/C/C 2026 field identities with the manual BTX descriptor reused for all vegetative growth",
         "slug": "abc_btx_vegetative",
+    },
+    COMPACT_PANICLE_FIELD_PROFILE: {
+        "labels": GENOTYPES,
+        "row_labels": ROW_GENOTYPES,
+        "plots": tuple(
+            {
+                "plot": index + 1,
+                "rows": (index * 2, index * 2 + 1),
+                "genotype": genotype,
+            }
+            for index, genotype in enumerate(GENOTYPES)
+        ),
+        "plants_per_label": 20,
+        "descriptor_paths": {
+            genotype: Path("ManualAssets/Descriptors/BTX.sorghumls")
+            for genotype in GENOTYPES
+        },
+        "descriptor_session": "manual_btx_vegetative_reuse",
+        "vegetative_descriptor_source": "ManualAssets/Descriptors/BTX.sorghumls",
+        "panicle_parameter_policy": "compact_shared_abc_reproductive_presentation_separate_from_btx_vegetative",
+        "panicle_presentation": COMPACT_PANICLE_PRESENTATION,
+        "minimum_panicle_canopy_clearance_m": PANICLE_CANOPY_CLEARANCE_M,
+        "relabel_markers": False,
+        "ownership": "measured_abc_field_with_shared_btx_vegetative_and_compact_panicle_presentation",
+        "basis": "Measured A/A/B/B/C/C 2026 field identities with shared BTX vegetative growth and a compact shared reproductive presentation",
+        "slug": "abc_btx_vegetative_compact_panicle",
     },
     MEASURED_VEGETATIVE_FIELD_PROFILE: {
         "labels": GENOTYPES,
@@ -576,6 +614,11 @@ def capture_state(
         "target_gdd": target_gdd,
         "camera_view": args.camera_view,
         "panicle_parameter_policy": profile["panicle_parameter_policy"],
+        "render_width": args.width,
+        "render_height": args.height,
+        "render_samples": args.samples,
+        "render_bounces": args.bounces,
+        "denoiser_strength": args.denoiser_strength,
     }
     if valid_cached_state(metadata, frame, expected):
         payload = json.loads(metadata.read_text(encoding="utf-8"))
@@ -604,6 +647,7 @@ def capture_state(
             args.samples,
             args.bounces,
             DEFAULT_PROFILE.gamma,
+            args.denoiser_strength,
         ):
             raise RuntimeError(f"state {state}: OptiX capture failed")
         apply_photo_grade(raw, graded)
@@ -647,6 +691,11 @@ def verify_state_outputs(
             "target_gdd": target_gdd,
             "camera_view": args.camera_view,
             "panicle_parameter_policy": profile["panicle_parameter_policy"],
+            "render_width": args.width,
+            "render_height": args.height,
+            "render_samples": args.samples,
+            "render_bounces": args.bounces,
+            "denoiser_strength": args.denoiser_strength,
         }
         if not valid_cached_state(metadata, frame, expected):
             raise RuntimeError(f"invalid state output: {state}")
@@ -774,9 +823,13 @@ def run(args: argparse.Namespace) -> Path:
         raise ValueError("the published 2026 timeline is fixed at 1,000 field states")
     if args.width <= 0 or args.height <= 0 or args.width % 2 or args.height % 2:
         raise ValueError("video dimensions must be positive and even")
-    if args.endpoint_gdd_step <= 0.0 or args.max_endpoint_multiplier < 1.0:
+    if (
+        args.endpoint_gdd_step <= 0.0
+        or args.max_endpoint_multiplier < 1.0
+        or not 0.0 <= args.denoiser_strength <= 1.0
+    ):
         raise ValueError(
-            "endpoint GDD step must be positive and maximum multiplier must be at least one"
+            "endpoint GDD step, maximum multiplier, or denoiser strength is invalid"
         )
     profile = field_profile(args.field_profile)
     playback_rates(args.playback_fps)
@@ -910,6 +963,7 @@ def run(args: argparse.Namespace) -> Path:
                 "height": args.height,
                 "samples": args.samples,
                 "bounces": args.bounces,
+                "denoiser_strength": args.denoiser_strength,
                 "fixed_midday_profile": DEFAULT_PROFILE.to_dict(),
                 "camera": camera,
                 "field_leaf_lod": {
@@ -998,6 +1052,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--max-endpoint-multiplier", type=float, default=2.0)
     parser.add_argument("--samples", type=int, default=1)
     parser.add_argument("--bounces", type=int, default=2)
+    parser.add_argument("--denoiser-strength", type=float, default=0.0)
     parser.add_argument("--warmup-frames", type=int, default=1)
     parser.add_argument("--max-wait-frames", type=int, default=30000)
     parser.add_argument("--no-video", action="store_true")
