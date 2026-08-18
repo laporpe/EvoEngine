@@ -418,6 +418,9 @@ def generate_10x10_scene(evo: object, args: argparse.Namespace) -> Path:
             instantiated = int(evo.InstantiateSorghumLsPlantsFromPlantingMarkers())
             if instantiated != 200:
                 raise RuntimeError(f"10x10: expected 200 instantiated planting markers, got {instantiated}")
+            conformed = int(evo.ConformSorghumLsPlantsToGroundMesh())
+            if conformed != 200:
+                raise RuntimeError(f"10x10: expected 200 plants conformed to the ground surface, got {conformed}")
             btx_descriptor = calibrated_descriptor(
                 args.calibrated_descriptor_root, args.ten_by_ten_descriptor_date, "BTX"
             )
@@ -737,9 +740,10 @@ def run_worker_processes(args: argparse.Namespace, dates: list[str]) -> tuple[li
             metadata_rows.extend(read_csv(metadata_path))
             generated.append(target_4x10_scene(date))
     if not args.skip_10x10:
-        result = subprocess.run(worker_command(args, "10x10"), cwd=args.repo_root, check=False)
         scene_path = args.project_root / "Assets" / TEN_BY_TEN_TARGET_SCENE
-        if not scene_path.exists():
+        previous_mtime = scene_path.stat().st_mtime_ns if scene_path.exists() else None
+        result = subprocess.run(worker_command(args, "10x10"), cwd=args.repo_root, check=False)
+        if not scene_path.exists() or scene_path.stat().st_mtime_ns == previous_mtime:
             raise RuntimeError(f"10x10 worker failed with exit code {result.returncode}")
         generated.append(Path(TEN_BY_TEN_TARGET_SCENE))
     return generated, metadata_rows

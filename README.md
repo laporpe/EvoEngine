@@ -77,6 +77,7 @@ For detailed setup, platform requirements, Linux commands, VSCode notes, and ins
 | Runtime packages | [docs/runtime-packages.md](docs/runtime-packages.md) |
 | Extending EvoEngine | [docs/extending-evoengine.md](docs/extending-evoengine.md) |
 | Python bindings | [docs/python-bindings.md](docs/python-bindings.md) |
+| 2026 sorghum 6x10 experiment | [docs/sorghum-2026-6x10.md](docs/sorghum-2026-6x10.md) |
 | Runtime package index | [EvoEngine_Packages/README.md](EvoEngine_Packages/README.md) |
 | Service index | [EvoEngine_Services/README.md](EvoEngine_Services/README.md) |
 
@@ -130,10 +131,23 @@ python -m pip install -r PythonBinding\requirements-mobile-review.txt
 python PythonBinding\sorghum_render_4x10_mobile_review.py --width 3840 --height 2160 --samples 128 --bounces 4
 ```
 
-The package is written to `out/realism_review/sorghum_4x10/Iteration_01_RT_PhysicalSun`. Add `--publish-drive` to
+The package is written to `out/realism_review/sorghum_4x10/Iteration_02_FieldPhotographic`. Add `--publish-drive` to
 publish the verified iteration under
-`G:\My Drive\Sorghum\4x10_Scene_Review_Latest\Iteration_01_RT_PhysicalSun` without replacing earlier reviews.
+`G:\My Drive\Sorghum\4x10_Scene_Review_Latest\Iteration_02_FieldPhotographic` without replacing earlier reviews.
 It contains 45 lossless Scene (RT) captures, 45 labeled images, five stage contact sheets, and a PDF review book.
+
+The three scene views use a fixed 42-degree field perspective, near-top-down fallback, and row-side fallback across
+all five dates. During camera capture only, a nonserializable 1 m grid reuses the authored soil material beyond the
+finite ground mesh. Its UVs preserve the measured 2 m scan footprint and the same low-frequency warp as the canonical
+ground; the grid remains flat and 15 mm below the measured mesh, then is removed immediately after capture. The
+labeled stills and optional video receive a conservative display-referred color grade, while the lossless `raw/`
+images remain ungraded. Mountains and photographic backplates are intentionally omitted unless a site-authoritative
+reference becomes available.
+
+EvoEngine's leaf BSSRDF was evaluated at factor `0.12` and radius `0.8` mm against factor `0` with identical seed,
+camera, light, soil, and ray settings. The PNGs were byte-identical because post-growth material edits do not reach
+the current OptiX material record. The presentation therefore leaves calibrated leaf subsurface values at zero and
+does not modify the renderer or illumination backend to manufacture the effect.
 
 To regenerate all calibrated scenes and publish the review in one operation:
 
@@ -173,7 +187,14 @@ set with:
 python PythonBinding\sorghum_bake_soil_relief.py
 ```
 
-The scene generator conforms each plant root to the displaced ground surface.
+Audit the current mesh hash, relief range, 2 m footprint, and stored warped UVs without modifying the asset with:
+
+```bat
+python PythonBinding\sorghum_bake_soil_relief.py --validate-only --report out\validation\soil_relief.json
+```
+
+The scene generator conforms each plant root to the displaced ground surface. The render-only continuation does not
+change that mesh, its material, plant placement, PARBAR geometry, or illumination sampling.
 After the five-stage review is rendered, append and publish the mature 10x10 views with:
 
 ```bat
@@ -201,8 +222,43 @@ For the optional 25-second paper video, run 100 realizations per date with `--vi
 python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py --replicates 100 --probes-per-panel 100 --samples 64 --bounces 4 --video --output-dir out\handoff\sorghum_4x10_parbar_video_100
 ```
 
+Add `--video-solar-sweep` for a presentation-only Arizona solar day on every date. The 100 EvoEngine realizations
+span local sunrise through sunset at the original illumination workflow's NSRDB site (`33.08 N, 111.97 W`, MST),
+then each unique render is held for three frames to preserve the five-second, 60 FPS date segments. PARBAR sampling
+still uses the fixed reference sun. Within every engine batch, all scientific estimates finish before the same geometry
+seeds are regrown for presentation-only ground and moving-sun captures. This phase separation prevents decorative
+OptiX scene rebuilds from perturbing even seeded edge intersections in the scientific pass:
+
+```bat
+python PythonBinding\sorghum_4x10_parbar_sensor_illumination_handoff.py ^
+  --replicates 100 --probes-per-panel 100 --samples 64 --bounces 4 ^
+  --video --video-solar-sweep --video-samples 4 --video-bounces 2 ^
+  --output-dir out\handoff\sorghum_4x10_video_100_sunrise_sunset
+```
+
+When the Evo solar scenes are already encoded, replace their dashboard from an independent fixed-sun control without
+rerendering any scene pixels:
+
+```bat
+python PythonBinding\sorghum_recompose_4x10_solar_video.py ^
+  --source-video out\handoff\sorghum_4x10_video_100_sunrise_sunset\visualizations\sorghum_4x10_illumination_convergence.mp4 ^
+  --scientific-control-dir out\handoff\sorghum_4x10_fixed_sun_control ^
+  --output-dir out\handoff\sorghum_4x10_video_100_sunrise_sunset_recomposed
+```
+
+The recomposed manifest hashes both sources, records that Blender was not used, and labels the lower panel as the
+validated final mean rather than a running estimate.
+
 Video output is limited to at most 300 realizations, requires Pillow plus `ffmpeg` and `ffprobe`, and does not alter the
 scientific CSV calculation. The CSV-only 10,000-replicate run remains the production path.
+
+To prove presentation capture did not change a paired campaign, compare its two output directories byte-for-byte:
+
+```bat
+python PythonBinding\sorghum_validate_4x10_presentation_invariance.py out\validation\science_only out\validation\with_presentation --report out\validation\presentation_invariance.json
+```
+
+The validator requires exact equality for the aggregate PARBAR, individual-plant, clump, and replicate-seed CSVs.
 
 `PythonBinding/sorghum_4x10_scene.py` is the small importable boundary for custom analysis. Resolve one date with
 `query_4x10_scene(...)`, prepare its in-process scene once, then call `grow_4x10_scene(...)` for each morphology seed.
@@ -231,6 +287,37 @@ grow_4x10_scene(evo, scene, geometry_seed=2_001_000, max_wait_frames=30000)
 ```
 
 The full CSV command above already uses this API; the sketch is only for a consumer supplying custom probe logic.
+
+### Blender 4x10 export
+
+Export one generated growth-stage scene with the authored Cycles leaf, soil, PARBAR, camera, color-management, and
+Nishita sky setup by selecting its date from the field manifest:
+
+```bat
+python Scripts\blender\export_lsystem_date_height_fit_scenes.py ^
+  --blender "C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" ^
+  --dates 2021-08-18 --skip-render
+```
+
+The driver preserves the saved L-system growth state, applies the fixed author-approved field camera captured from
+the manually composed 2021-08-18 scene, writes the final `.blend`, and then reopens it in Blender. The same absolute
+camera transform and 32 mm lens are used for every date so growth-stage comparisons do not inherit framing drift. The
+reopen audit fails the command if the authored leaf SSS and micro-surface graph, bundled textures, PARBAR and ground
+materials, Nishita parameters, camera, Cycles settings, or AgX settings differ from the export contract. Its JSON
+report records the actual saved node sockets and links as well as the EvoEngine morphology/export manifest.
+
+The render-only color profile was matched to the field color-card and plant/soil photographs. It reduces the pale
+leaf response with lower SSS/specular fill, calibrates leaf and soil albedo nodes, uses directional late-day Nishita
+lighting, and separates camera-visible sky gain from environment illumination. Render a quick check through the
+authored saved camera:
+
+```bat
+"C:\Program Files\Blender Foundation\Blender 5.0\blender.exe" --background ^
+  --python Scripts\blender\render_lsystem_color_variants.py -- ^
+  --blend out\exports\lsystem_date_height_fit_blender\2021-08-18\sorghum_lsystem_4x10_parbar_2021-08-18_height_fit_cycles_ground_displacement.blend ^
+  --output-dir out\exports\lsystem_date_height_fit_blender\2021-08-18\color_check ^
+  --profiles reference_photo --camera-profile saved
+```
 
 ### Frozen 4x10 scenes
 

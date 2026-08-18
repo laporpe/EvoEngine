@@ -28,6 +28,13 @@ from sorghum_asset_layout import (
     four_by_ten_scene,
     growth_stage,
 )
+from sorghum_4x10_presentation import (
+    DEFAULT_PROFILE,
+    apply_photo_grade,
+    camera_for_style,
+    configure_lighting,
+    set_ground_extension,
+)
 
 
 VIEW_ORDER = (
@@ -53,7 +60,7 @@ VIEW_LABELS = {
     "pawaga_leaf": "Pawaga mid-canopy leaf surface",
 }
 REFERENCE_SCENE = MANUAL_4X10_SCENE
-DRIVE_FOLDER_NAME = "Iteration_01_RT_PhysicalSun"
+DRIVE_FOLDER_NAME = "Iteration_02_FieldPhotographic"
 DEFAULT_DRIVE_OUTPUT_DIR = Path(r"G:\My Drive\Sorghum\4x10_Scene_Review_Latest") / DRIVE_FOLDER_NAME
 LABEL_BAND_HEIGHT = 116
 SUN_ANGLES_DEGREES = (55.0, 30.0, 0.0)
@@ -433,69 +440,84 @@ def capture_scene(
             for cultivar, record in representatives.items()
         }
         cameras = {
-            "scene_oblique": fit_camera(shared_bounds, (1.0, 0.65, 1.0), (0.0, 1.0, 0.0), 50.0, aspect, 1.10),
-            "scene_top": fit_camera(shared_bounds, (0.0, 1.0, 0.0), (0.0, 0.0, -1.0), 50.0, aspect, 1.06),
-            "scene_row": fit_camera(shared_bounds, (0.0, 0.18, 1.0), (0.0, 1.0, 0.0), 48.0, aspect, 1.08),
+            "scene_oblique": camera_for_style(
+                "field_perspective", args.width, capture_height
+            ),
+            "scene_top": camera_for_style(
+                "near_top_down", args.width, capture_height
+            ),
+            "scene_row": camera_for_style("row_side", args.width, capture_height),
         }
         for cultivar, record in representatives.items():
             for detail, camera in plant_detail_cameras(record, aspect).items():
                 cameras[f"{cultivar.lower()}_{detail}"] = camera
 
-        sun_angles = make_vec3(evo, SUN_ANGLES_DEGREES)
-        sun_color = make_vec3(evo, (1.0, 1.0, 1.0))
-        if not evo.ConfigureRayTracerSkydome(
-            sun_angles,
-            SUN_ANGULAR_DIAMETER_RADIANS,
-            1.0,
-            sun_color,
-            1.0,
-            0.1,
-            2.2,
-        ):
-            raise RuntimeError(f"{date}: failed to configure the RT skydome")
-
-        for view_index, view in enumerate(VIEW_ORDER, start=1):
-            camera = cameras[view]
-            apply_camera(evo, camera)
-            evo.LoopFrames(args.warmup_frames)
-            stage = growth_stage(date)
-            raw_path = raw_dir / f"{stage}_{view}.png"
-            if not evo.CaptureCurrentSceneRayTraced(
-                args.width, capture_height, raw_path, args.samples, args.bounces, 2.2
-            ):
-                raise RuntimeError(f"capture failed: {date} {view}")
-            metrics = validate_image(raw_path, args.width, capture_height, Image, ImageStat)
-            output_path = still_dir / f"{view_index:02d}_{stage}_{view}.jpg"
-            framing = "fixed comparison framing" if view.startswith("scene_") else "representative-plant framing"
-            subtitle = (
-                f"width {width_scale:.3f}x | thickness {thickness_m * 1000.0:.3f} mm | "
-                f"seed {args.geometry_seed} | RT {args.samples} spp / {args.bounces} bounces | {framing}"
-            )
-            label_image(
-                raw_path,
-                output_path,
-                f"{stage} | {date} | {VIEW_LABELS[view]}",
-                subtitle,
-                Image,
-                ImageDraw,
-                ImageFont,
-                args.jpeg_quality,
-            )
-            validate_image(output_path, args.width, args.height, Image, ImageStat)
-            paths[view] = output_path
-            scene_record["views"].append(
-                {
-                    "id": view,
-                    "file": output_path.relative_to(package_root).as_posix(),
-                    "raw_file": raw_path.relative_to(package_root).as_posix(),
-                    "sha256": sha256(output_path),
-                    "raw_sha256": sha256(raw_path),
-                    "lighting": "rt_physical_sun",
-                    "framing": framing,
-                    "camera": camera,
-                    **metrics,
-                }
-            )
+        configure_lighting(evo)
+        ground_extended = 0
+        try:
+            ground_extended = set_ground_extension(evo, True)
+            if hasattr(evo, "ConfigurePresentationGroundExtension") and ground_extended != 1:
+                raise RuntimeError(f"{date}: failed to create presentation ground extension")
+            evo.LoopFrames(1)
+            for view_index, view in enumerate(VIEW_ORDER, start=1):
+                camera = cameras[view]
+                apply_camera(evo, camera)
+                evo.LoopFrames(args.warmup_frames)
+                stage = growth_stage(date)
+                raw_path = raw_dir / f"{stage}_{view}.png"
+                if not evo.CaptureCurrentSceneRayTraced(
+                    args.width,
+                    capture_height,
+                    raw_path,
+                    args.samples,
+                    args.bounces,
+                    DEFAULT_PROFILE.gamma,
+                ):
+                    raise RuntimeError(f"capture failed: {date} {view}")
+                metrics = validate_image(raw_path, args.width, capture_height, Image, ImageStat)
+                graded_path = package_root / f".{stage}_{view}.graded.png"
+                apply_photo_grade(raw_path, graded_path)
+                output_path = still_dir / f"{view_index:02d}_{stage}_{view}.jpg"
+                framing = (
+                    "fixed photographic framing"
+                    if view.startswith("scene_")
+                    else "representative-plant framing"
+                )
+                subtitle = (
+                    f"width {width_scale:.3f}x | thickness {thickness_m * 1000.0:.3f} mm | "
+                    f"seed {args.geometry_seed} | RT {args.samples} spp / {args.bounces} bounces | {framing}"
+                )
+                try:
+                    label_image(
+                        graded_path,
+                        output_path,
+                        f"{stage} | {date} | {VIEW_LABELS[view]}",
+                        subtitle,
+                        Image,
+                        ImageDraw,
+                        ImageFont,
+                        args.jpeg_quality,
+                    )
+                finally:
+                    graded_path.unlink(missing_ok=True)
+                validate_image(output_path, args.width, args.height, Image, ImageStat)
+                paths[view] = output_path
+                scene_record["views"].append(
+                    {
+                        "id": view,
+                        "file": output_path.relative_to(package_root).as_posix(),
+                        "raw_file": raw_path.relative_to(package_root).as_posix(),
+                        "sha256": sha256(output_path),
+                        "raw_sha256": sha256(raw_path),
+                        "lighting": DEFAULT_PROFILE.name,
+                        "framing": framing,
+                        "camera": camera,
+                        **metrics,
+                    }
+                )
+        finally:
+            if ground_extended:
+                set_ground_extension(evo, False)
     finally:
         pass
     return scene_record, shared_bounds, layout, paths
@@ -511,7 +533,7 @@ def make_contact_sheet(
     draw = ImageDraw.Draw(canvas)
     title_font, _subtitle_font, label_font = fonts(ImageFont)
     draw.text((56, 48), "4x10 Sorghum RT Realism Review", font=title_font, fill=(24, 31, 33))
-    draw.text((58, 107), "Physical-sun oblique views - fixed framing across stages", font=label_font, fill=(67, 79, 82))
+    draw.text((58, 107), "Field-perspective views - fixed framing across stages", font=label_font, fill=(67, 79, 82))
     slots = ((55, 165), (745, 165), (55, 700), (745, 700), (375, 1235))
     for date, (x, y) in zip(paths_by_date, slots):
         with Image.open(paths_by_date[date]["scene_oblique"]).convert("RGB") as image:
@@ -604,7 +626,7 @@ def make_pdf(
         width_scale, thickness_m, _maximum_height = settings_by_date[date]
         metadata = f"Leaf width {width_scale:.3f}x | thickness {thickness_m * 1000.0:.3f} mm"
         stage = growth_stage(date)
-        begin_page(f"{stage} | {date} - Scene", metadata + " | OptiX physical sun")
+        begin_page(f"{stage} | {date} - Scene", metadata + " | OptiX field-photographic profile")
         draw_pdf_image(pdf, ImageReader, paths["scene_oblique"], 36, 610, 648, 265)
         draw_pdf_image(pdf, ImageReader, paths["scene_top"], 36, 335, 648, 245)
         draw_pdf_image(pdf, ImageReader, paths["scene_row"], 36, 60, 648, 245)
@@ -626,13 +648,16 @@ def make_pdf(
 
 def write_readme(path: Path) -> None:
     path.write_text(
-        "4x10 Sorghum RT Realism Review - Iteration 01\n"
+        "4x10 Sorghum RT Realism Review - Iteration 02\n"
         "================================================\n\n"
         "Open Sorghum_4x10_Scene_Review.pdf for the mobile review book.\n"
         "Lossless OptiX captures are under raw/ and labeled review images are under stills/.\n"
         "Per-stage 3x3 summaries are under contact_sheets/.\n"
-        "All views use a 0.526-degree physical sun with fixed RT settings.\n"
-        "Scene files are never saved or modified by this renderer.\n",
+        "Scene overviews use fixed five-date photographic framing and the field_photographic_v1 profile.\n"
+        "A nonserializable render-only soil extension hides the finite ground edge and is removed after capture.\n"
+        "Raw images are ungraded; labeled stills use the conservative display grade recorded in manifest.json.\n"
+        "No mountain or photographic backplate is invented when no site reference is available.\n"
+        "Scene and calibrated descriptor files are never saved or modified by this renderer.\n",
         encoding="utf-8",
     )
 
@@ -1049,7 +1074,7 @@ def main() -> None:
             )
             write_readme(package_root / "README.txt")
             manifest = {
-                "package_version": 1,
+                "package_version": 2,
                 "generated_utc": datetime.now(timezone.utc).isoformat(),
                 "geometry_seed": args.geometry_seed,
                 "resolution": [args.width, args.height],
@@ -1057,16 +1082,9 @@ def main() -> None:
                 "ray_tracing": {
                     "samples_per_pixel": args.samples,
                     "bounces": args.bounces,
-                    "gamma": 2.2,
+                    "gamma": DEFAULT_PROFILE.gamma,
                 },
-                "skydome_lighting": {
-                    "sun_angles_degrees": list(SUN_ANGLES_DEGREES),
-                    "sun_angular_diameter_radians": SUN_ANGULAR_DIAMETER_RADIANS,
-                    "sun_intensity": 1.0,
-                    "sun_color": [1.0, 1.0, 1.0],
-                    "skylight_intensity": 1.0,
-                    "ambient_light_intensity": 0.1,
-                },
+                "presentation": DEFAULT_PROFILE.to_dict(),
                 "scenes": records,
             }
             manifest["files"] = package_hashes(package_root)

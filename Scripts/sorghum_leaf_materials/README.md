@@ -42,6 +42,33 @@ python 'Scripts\sorghum_leaf_materials\bake_lsystem_leaf_variant_atlas.py' `
   --out-dir 'out\generated_assets\SorghumLeafMaterials\ImageTestLeafVariants'
 ```
 
+## Bake Continuous Blender Presentation Atlas
+
+`bake_continuous_sorghum_leaf_atlas.py` is the close-up Blender presentation
+path for the 2026 6x10 experiment. It preserves the existing 3x3 UV ownership
+but gives every tile one continuous sorghum blade-collar-sheath surface rather
+than joining unrelated blade and sheath captures at V=0.5. The source master,
+its four field-photo references, hashes, generation method, prompt summary, and
+scientific-use boundary are recorded beside it under `assets/`.
+
+The baker writes nine controlled variants and correlated albedo, tangent-space
+normal, 16-bit height, roughness, AO, metallic, and thickness maps. It reports
+the objective V=0.5 jump for every map. These files are explicitly
+`blender_presentation_only`; they are not assigned to an EvoEngine material and
+do not participate in PARBAR illumination.
+
+```powershell
+python 'Scripts\sorghum_leaf_materials\bake_continuous_sorghum_leaf_atlas.py' `
+  --master 'Scripts\sorghum_leaf_materials\assets\leaf_anatomy_master_v2.png' `
+  --output-dir 'out\exports\sorghum_2026_6x10_blender\leaf_assets' `
+  --tile-size 1536
+```
+
+`prepare_lsystem_cycles_scene.py --leaf-atlas-dir ...` binds the seven maps to
+the Cycles leaf material. The final shader uses thickness-driven subsurface
+weight, a restrained underside tint, longitudinal anisotropy, correlated normal
+and height detail, and the existing approved color calibration.
+
 ## Apply Atlas To Scene
 
 `apply_sorghum_leaf_atlas_to_scene.py` updates scene-local `Material` assets referenced by `Leaf Mesh` and `Stem Mesh` renderers. It assigns the atlas Texture2D handles from `.evefilemeta` files and neutralizes material tint by setting albedo color to white.

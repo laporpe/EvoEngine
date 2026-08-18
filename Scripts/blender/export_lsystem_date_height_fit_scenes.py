@@ -17,6 +17,7 @@ DEFAULT_SOURCE_ROOT = DEFAULT_PROJECT.parent / "Assets" / "GeneratedAssets" / "R
 DEFAULT_OUTPUT_DIR = ROOT / "out" / "exports" / "lsystem_date_height_fit_blender"
 PREPARE_SCRIPT = ROOT / "Scripts" / "blender" / "prepare_lsystem_cycles_scene.py"
 GROUND_SCRIPT = ROOT / "Scripts" / "blender" / "setup_ground_displacement_render.py"
+VALIDATE_SCRIPT = ROOT / "Scripts" / "blender" / "validate_lsystem_cycles_scene.py"
 DATE_ORDER = ("2021-07-01", "2021-07-14", "2021-08-18", "2021-08-30", "2021-09-02")
 
 
@@ -53,12 +54,14 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def run_logged(command: list[str], log_path: Path) -> None:
+def run_logged(command: list[str], log_path: Path, success_marker: str | None = None) -> None:
     log_path.parent.mkdir(parents=True, exist_ok=True)
     result = subprocess.run(command, cwd=ROOT, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     log_path.write_text(result.stdout, encoding="utf-8")
     if result.returncode:
         raise SystemExit(f"Command failed with exit code {result.returncode}. See {log_path}")
+    if success_marker and success_marker not in result.stdout:
+        raise SystemExit(f"Command did not report success marker {success_marker!r}. See {log_path}")
 
 
 def selected_dates(raw: str) -> list[str]:
@@ -134,6 +137,7 @@ def export_one(args: argparse.Namespace, scene: DateScene) -> dict[str, str]:
     export_manifest = date_dir / f"{stem}_manifest.json"
     blend_path = date_dir / f"{stem}_cycles.blend"
     final_blend_path = date_dir / f"{stem}_cycles_ground_displacement.blend"
+    validation_report = date_dir / f"{stem}_cycles_validation.json"
     render_path = date_dir / f"{stem}_labeled.png"
 
     run_logged(
@@ -149,6 +153,7 @@ def export_one(args: argparse.Namespace, scene: DateScene) -> dict[str, str]:
             str(gltf_path),
         ],
         date_dir / "evoengine_export.log",
+        "EVOENGINE_LSYSTEM_BLENDER_EXPORT_RESULT passed",
     )
 
     prepare_command = [
@@ -172,7 +177,7 @@ def export_one(args: argparse.Namespace, scene: DateScene) -> dict[str, str]:
     ]
     if args.skip_ground_pass and not args.skip_render:
         prepare_command.extend(["--render-output", str(render_path)])
-    run_logged(prepare_command, date_dir / "blender_prepare.log")
+    run_logged(prepare_command, date_dir / "blender_prepare.log", "SWEEP_BLENDER_PREPARE passed")
 
     if args.skip_ground_pass:
         final_blend_path = blend_path
@@ -206,9 +211,42 @@ def export_one(args: argparse.Namespace, scene: DateScene) -> dict[str, str]:
         if args.skip_render:
             ground_command.append("--skip-render")
         ground_log = str(date_dir / "blender_ground.log")
-        run_logged(ground_command, date_dir / "blender_ground.log")
+        run_logged(ground_command, date_dir / "blender_ground.log", "SWEEP_BLENDER_GROUND passed")
 
-    expected = [gltf_path, export_manifest, blend_path, final_blend_path]
+    validate_command = [
+        args.blender,
+        "--background",
+        "--python",
+        str(VALIDATE_SCRIPT),
+        "--",
+        "--blend",
+        str(final_blend_path),
+        "--report",
+        str(validation_report),
+        "--evoengine-manifest",
+        str(export_manifest),
+        "--expected-source-scene",
+        scene.scene_asset_path,
+        "--expected-samples",
+        str(args.samples),
+        "--expected-resolution-x",
+        str(args.resolution_x),
+        "--expected-resolution-y",
+        str(args.resolution_y),
+        "--expected-ground-strength",
+        str(args.displacement_strength),
+        "--expected-material-displacement",
+        str(args.material_displacement_strength),
+    ]
+    if not args.skip_ground_pass:
+        validate_command.append("--expect-ground")
+    run_logged(
+        validate_command,
+        date_dir / "blender_validation.log",
+        "SWEEP_BLENDER_SCENE_VALIDATION passed",
+    )
+
+    expected = [gltf_path, export_manifest, blend_path, final_blend_path, validation_report]
     if not args.skip_render:
         expected.append(render_path)
     missing = [str(path) for path in expected if not path.exists()]
@@ -222,9 +260,11 @@ def export_one(args: argparse.Namespace, scene: DateScene) -> dict[str, str]:
         "evoengine_manifest_path": str(export_manifest),
         "blend_path": str(final_blend_path),
         "preview_png_path": "" if args.skip_render else str(render_path),
+        "validation_report_path": str(validation_report),
         "evoengine_log": str(date_dir / "evoengine_export.log"),
         "blender_prepare_log": str(date_dir / "blender_prepare.log"),
         "blender_ground_log": ground_log,
+        "blender_validation_log": str(date_dir / "blender_validation.log"),
     }
 
 

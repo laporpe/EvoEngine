@@ -163,6 +163,64 @@ std::vector<Entity> CollectDescendants(const std::shared_ptr<Scene>& scene, cons
   return descendants;
 }
 
+std::string CultivarFromPlantName(const std::string& name);
+bool IsSorghumPlantingMarkerName(const std::string& name);
+
+std::vector<std::vector<glm::vec3>> CollectManualTwoByTenBlock(const std::shared_ptr<Scene>& scene,
+                                                               const std::string& cultivar) {
+  std::vector<glm::vec3> positions;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (scene->IsEntityValid(entity) && IsSorghumPlantingMarkerName(scene->GetEntityName(entity)) &&
+        CultivarFromPlantName(scene->GetEntityName(entity)) == cultivar) {
+      positions.emplace_back(scene->GetDataComponent<GlobalTransform>(entity).GetPosition());
+    }
+  }
+  if (positions.size() != 20) {
+    return {};
+  }
+  std::sort(positions.begin(), positions.end(), [](const glm::vec3& left, const glm::vec3& right) {
+    return left.z != right.z ? left.z > right.z : left.x < right.x;
+  });
+  std::vector<std::vector<glm::vec3>> rows(2);
+  rows[0] = {positions.begin(), positions.begin() + 10};
+  rows[1] = {positions.begin() + 10, positions.end()};
+  for (auto& row : rows) {
+    std::sort(row.begin(), row.end(), [](const glm::vec3& left, const glm::vec3& right) {
+      return left.x < right.x;
+    });
+    const auto [min_z, max_z] =
+        std::minmax_element(row.begin(), row.end(), [](const glm::vec3& left, const glm::vec3& right) {
+          return left.z < right.z;
+        });
+    if (max_z->z - min_z->z > 0.01f) {
+      return {};
+    }
+  }
+  return rows;
+}
+
+glm::vec3 MeanPosition(const std::vector<std::vector<glm::vec3>>& rows) {
+  glm::vec3 result(0.0f);
+  for (const auto& row : rows) {
+    for (const auto& position : row) {
+      result += position;
+    }
+  }
+  return result / 20.0f;
+}
+
+void RenameEntityHierarchyPrefix(const std::shared_ptr<Scene>& scene, const Entity& root, const std::string& old_prefix,
+                                 const std::string& new_prefix) {
+  auto entities = CollectDescendants(scene, root);
+  entities.insert(entities.begin(), root);
+  for (const auto& entity : entities) {
+    const std::string name = scene->GetEntityName(entity);
+    if (name.rfind(old_prefix, 0) == 0) {
+      scene->SetEntityName(entity, new_prefix + name.substr(old_prefix.size()));
+    }
+  }
+}
+
 Entity FindParbarMeshEntity(const std::shared_ptr<Scene>& scene, const ParbarPanel& panel) {
   Entity root = FindEntityByName(scene, panel.root);
   if (scene && !scene->IsEntityValid(root)) {
@@ -204,13 +262,9 @@ bool NameContains(const std::string& name, const std::string& token) {
 }
 
 std::string CultivarFromPlantName(const std::string& name) {
-  if (NameContains(name, "pawaga")) {
-    return "Pawaga";
-  }
-  if (NameContains(name, "btx")) {
-    return "BTX";
-  }
-  return {};
+  constexpr const char* marker = "_LSystem_";
+  const size_t marker_position = name.find(marker);
+  return marker_position == std::string::npos || marker_position == 0 ? std::string{} : name.substr(0, marker_position);
 }
 
 bool MatchesCultivarFilter(const std::string& cultivar, const std::string& filter) {
@@ -1043,7 +1097,8 @@ float MeasureCalibrationPlantHeight(const SorghumLS& sorghum,
   l_system_package::SorghumSpline spline;
   for (const auto handle : sorghum.growth_model.graph.PeekSortedNodeList()) {
     const auto& node = sorghum.growth_model.graph.PeekNode(handle);
-    if (node.data.Is<SorghumInternode>()) {
+    if (node.data.Is<SorghumInternode>() || node.data.Is<SorghumPanicleRachis>() ||
+        node.data.Is<SorghumPanicleBranch>() || node.data.Is<SorghumPanicleSpikelet>()) {
       maximum_y = std::max({maximum_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
     } else if (node.data.Is<SorghumLeaf>()) {
       const auto& leaf = node.data.Get<SorghumLeaf>();
@@ -1061,7 +1116,10 @@ float MeasureCalibrationPlantHeight(const SorghumLS& sorghum,
       record.target_blade_length_m = leaf.target_blade_length;
       record.blade_width_m = leaf.blade_max_width;
       record.target_blade_width_m = leaf.target_blade_max_width;
+      record.insertion_angle_degrees = leaf.insertion_angle_deg;
+      record.target_insertion_angle_degrees = leaf.target_insertion_angle_deg;
       record.alive = leaf.alive;
+      record.is_flag_leaf = leaf.is_flag_leaf;
       if (!BuildCalibrationStemContext(sorghum.growth_model.graph, handle, stem_context)) {
         if (leaf_records)
           leaf_records->emplace_back(record);
@@ -1160,6 +1218,7 @@ LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<S
     sorghum->growth_model.FinalizeSnapshotMorphology();
 
   float root_height = 0.0f;
+  float panicle_tip_y = 0.0f;
   for (const auto handle : sorghum->growth_model.graph.PeekSortedNodeList()) {
     const auto& node = sorghum->growth_model.graph.PeekNode(handle);
     if (node.data.Is<SorghumRoot>()) {
@@ -1178,6 +1237,15 @@ LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<S
               std::max(record.main_culm_max_target_blade_width_m, leaf.target_blade_max_width);
         }
       }
+    } else if (node.data.Is<SorghumPanicleRachis>()) {
+      record.panicle_emerged = true;
+      panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
+    } else if (node.data.Is<SorghumPanicleBranch>()) {
+      ++record.panicle_branch_count;
+      panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
+    } else if (node.data.Is<SorghumPanicleSpikelet>()) {
+      ++record.panicle_spikelet_count;
+      panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
     } else if (include_organs && node.data.Is<SorghumInternode>()) {
       const auto& internode = node.data.Get<SorghumInternode>();
       LSystemInternodePhenotypeRecord internode_record;
@@ -1213,6 +1281,9 @@ LSystemDescriptorPhenotypeRecord MeasureDescriptorSample(const std::shared_ptr<S
     }
   }
   record.height_m = MeasureCalibrationPlantHeight(*sorghum, include_organs ? &record.leaves : nullptr);
+  if (record.panicle_emerged) {
+    record.panicle_tip_height_m = std::max(0.0f, panicle_tip_y - root_height);
+  }
   const auto main_axis = std::find_if(record.axes.begin(), record.axes.end(), [](const auto& axis) {
     return axis.axis_id == 0;
   });
@@ -1347,23 +1418,46 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("sun_intensity") = 1.0f, py::arg("sun_color") = glm::vec3(1.0f), py::arg("skylight_intensity") = 1.0f,
         py::arg("ambient_light_intensity") = 0.1f, py::arg("gamma") = 2.2f);
   m.def("CaptureCurrentSceneRayTraced", &CaptureCurrentSceneRayTraced, py::arg("resolution_x"), py::arg("resolution_y"),
-        py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f);
+        py::arg("output_path"), py::arg("samples") = 64, py::arg("bounces") = 4, py::arg("gamma") = 2.2f,
+        py::arg("denoiser_strength") = 0.0f);
+  m.def("ConfigurePresentationGroundExtension", &ConfigurePresentationGroundExtension, py::arg("enabled"),
+        py::arg("size_m") = 160.0f, py::arg("texture_repeat_m") = 2.0f, py::arg("grid_spacing_m") = 1.0f);
   m.def("GetRayTracerBuildCounters", &GetRayTracerBuildCounters);
   m.def("GrowSorghumLsPlantsToAdulthood", &GrowSorghumLsPlantsToAdulthood, py::arg("seed_base") = -1,
         py::arg("cultivar_filter") = "", py::arg("reuse_geometry_entities") = false,
         py::arg("update_render_geometry") = true);
   m.def("GrowSorghumLsPlantsToGdd", &GrowSorghumLsPlantsToGdd, py::arg("evaluation_gdd"), py::arg("seed_base") = -1,
         py::arg("update_render_geometry") = true);
+  m.def("AdvanceSorghumLsPlantsToGdd", &AdvanceSorghumLsPlantsToGdd, py::arg("evaluation_gdd"),
+        py::arg("seed_base") = -1, py::arg("update_render_geometry") = true);
   m.def("MaterializeSorghumLsPlantGeometry", &MaterializeSorghumLsPlantGeometry,
         py::arg("update_render_geometry") = false);
   m.def("SetSorghumLsLeafThickness", &SetSorghumLsLeafThickness, py::arg("leaf_thickness_m"),
         py::arg("regenerate_geometry") = true);
   m.def("SetSorghumLsLeafWidthScale", &SetSorghumLsLeafWidthScale, py::arg("leaf_width_scale"),
         py::arg("regenerate_geometry") = true);
+  m.def("ConfigureSorghumLsLeafMeshQuality", &ConfigureSorghumLsLeafMeshQuality, py::arg("vertical_subdivision_length"),
+        py::arg("horizontal_subdivision_step"), py::arg("bottom_face") = true, py::arg("enable_leaf_sheath") = true,
+        py::arg("regenerate_geometry") = false);
+  m.def("SetSorghumLsFinalizeSnapshotMorphology", &SetSorghumLsFinalizeSnapshotMorphology, py::arg("enabled"));
+  m.def("ConfigureSorghumLsPaniclePresentation", &ConfigureSorghumLsPaniclePresentation, py::arg("peduncle_length_m"),
+        py::arg("rachis_length_m"), py::arg("branch_length_m"), py::arg("primary_branch_count"),
+        py::arg("spikelet_pairs_per_branch"), py::arg("spikelet_length_m"), py::arg("spikelet_radius_m"),
+        py::arg("immature_red"), py::arg("immature_green"), py::arg("immature_blue"), py::arg("mature_red"),
+        py::arg("mature_green"), py::arg("mature_blue"));
   m.def("SetSorghumLsCultivarDescriptors", &SetSorghumLsCultivarDescriptors, py::arg("btx_descriptor_path"),
         py::arg("pawaga_descriptor_path"), py::arg("regenerate_geometry") = true, py::arg("seed_base") = -1);
+  m.def("SetSorghumLsGenotypeDescriptors", &SetSorghumLsGenotypeDescriptors, py::arg("descriptor_paths"),
+        py::arg("regenerate_geometry") = true, py::arg("seed_base") = -1);
   m.def("SetSorghumLsGridSpacing", &SetSorghumLsGridSpacing, py::arg("spacing_x"), py::arg("spacing_z"),
         py::arg("cultivar_filter") = "");
+  m.def("ConfigureSorghumLsPlantingGrid", &ConfigureSorghumLsPlantingGrid, py::arg("row_genotypes"), py::arg("columns"),
+        py::arg("column_spacing_m") = 0.76f, py::arg("row_spacing_m") = 1.10f, py::arg("center_x_m") = 2.58f,
+        py::arg("center_z_m") = -7.51f);
+  m.def("RelabelSorghumLsPlantingMarkersByRow", &RelabelSorghumLsPlantingMarkersByRow, py::arg("row_genotypes"));
+  m.def("ConfigureSorghumLsReplicatedSixByTenProfile", &ConfigureSorghumLsReplicatedSixByTenProfile,
+        py::arg("block_genotypes"));
+  m.def("RemoveParbarContext", &RemoveParbarContext);
   m.def("ConformSorghumLsPlantsToGroundMesh", &ConformSorghumLsPlantsToGroundMesh);
   m.def("RemoveSorghumLsPseudoTillerPlants", &RemoveSorghumLsPseudoTillerPlants);
   m.def("ConvertSorghumLsPlantsToPlantingMarkers", &ConvertSorghumLsPlantsToPlantingMarkers);
@@ -1470,6 +1564,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("target_blade_length_m", &LSystemLeafPhenotypeRecord::target_blade_length_m)
       .def_readonly("blade_width_m", &LSystemLeafPhenotypeRecord::blade_width_m)
       .def_readonly("target_blade_width_m", &LSystemLeafPhenotypeRecord::target_blade_width_m)
+      .def_readonly("insertion_angle_degrees", &LSystemLeafPhenotypeRecord::insertion_angle_degrees)
+      .def_readonly("target_insertion_angle_degrees", &LSystemLeafPhenotypeRecord::target_insertion_angle_degrees)
       .def_readonly("collar_height_m", &LSystemLeafPhenotypeRecord::collar_height_m)
       .def_readonly("tip_height_m", &LSystemLeafPhenotypeRecord::tip_height_m)
       .def_readonly("maximum_height_m", &LSystemLeafPhenotypeRecord::maximum_height_m)
@@ -1479,7 +1575,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("centerline_lateral_span_m", &LSystemLeafPhenotypeRecord::centerline_lateral_span_m)
       .def_readonly("centerline_arc_to_chord_ratio", &LSystemLeafPhenotypeRecord::centerline_arc_to_chord_ratio)
       .def_readonly("surface_waviness_rms_m", &LSystemLeafPhenotypeRecord::surface_waviness_rms_m)
-      .def_readonly("alive", &LSystemLeafPhenotypeRecord::alive);
+      .def_readonly("alive", &LSystemLeafPhenotypeRecord::alive)
+      .def_readonly("is_flag_leaf", &LSystemLeafPhenotypeRecord::is_flag_leaf);
 
   py::class_<LSystemInternodePhenotypeRecord>(m, "LSystemInternodePhenotypeRecord")
       .def_readonly("axis_id", &LSystemInternodePhenotypeRecord::axis_id)
@@ -1508,7 +1605,10 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("triangle_count", &LSystemDescriptorPhenotypeRecord::triangle_count)
       .def_readonly("leaf_triangle_count", &LSystemDescriptorPhenotypeRecord::leaf_triangle_count)
       .def_readonly("stem_triangle_count", &LSystemDescriptorPhenotypeRecord::stem_triangle_count)
+      .def_readonly("panicle_branch_count", &LSystemDescriptorPhenotypeRecord::panicle_branch_count)
+      .def_readonly("panicle_spikelet_count", &LSystemDescriptorPhenotypeRecord::panicle_spikelet_count)
       .def_readonly("height_m", &LSystemDescriptorPhenotypeRecord::height_m)
+      .def_readonly("panicle_tip_height_m", &LSystemDescriptorPhenotypeRecord::panicle_tip_height_m)
       .def_readonly("main_culm_tip_height_m", &LSystemDescriptorPhenotypeRecord::main_culm_tip_height_m)
       .def_readonly("main_culm_highest_mature_collar_height_m",
                     &LSystemDescriptorPhenotypeRecord::main_culm_highest_mature_collar_height_m)
@@ -1525,6 +1625,7 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("leaf_area", &LSystemDescriptorPhenotypeRecord::leaf_area)
       .def_readonly("stem_area", &LSystemDescriptorPhenotypeRecord::stem_area)
       .def_readonly("has_geometry", &LSystemDescriptorPhenotypeRecord::has_geometry)
+      .def_readonly("panicle_emerged", &LSystemDescriptorPhenotypeRecord::panicle_emerged)
       .def_readonly("axes", &LSystemDescriptorPhenotypeRecord::axes)
       .def_readonly("leaves", &LSystemDescriptorPhenotypeRecord::leaves)
       .def_readonly("internodes", &LSystemDescriptorPhenotypeRecord::internodes);
@@ -1552,6 +1653,16 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("leaf_triangle_count", &LSystemPlantSceneMetadataRecord::leaf_triangle_count)
       .def_readonly("culm_vertex_count", &LSystemPlantSceneMetadataRecord::culm_vertex_count)
       .def_readonly("culm_triangle_count", &LSystemPlantSceneMetadataRecord::culm_triangle_count)
+      .def_readonly("panicle_vertex_count", &LSystemPlantSceneMetadataRecord::panicle_vertex_count)
+      .def_readonly("panicle_triangle_count", &LSystemPlantSceneMetadataRecord::panicle_triangle_count)
+      .def_readonly("panicle_branch_count", &LSystemPlantSceneMetadataRecord::panicle_branch_count)
+      .def_readonly("panicle_spikelet_count", &LSystemPlantSceneMetadataRecord::panicle_spikelet_count)
+      .def_readonly("vegetative_organ_count", &LSystemPlantSceneMetadataRecord::vegetative_organ_count)
+      .def_readonly("immature_vegetative_organ_count",
+                    &LSystemPlantSceneMetadataRecord::immature_vegetative_organ_count)
+      .def_readonly("panicle_organ_count", &LSystemPlantSceneMetadataRecord::panicle_organ_count)
+      .def_readonly("immature_panicle_organ_count", &LSystemPlantSceneMetadataRecord::immature_panicle_organ_count)
+      .def_readonly("developmental_module_count", &LSystemPlantSceneMetadataRecord::developmental_module_count)
       .def_readonly("last_grow_seconds", &LSystemPlantSceneMetadataRecord::last_grow_seconds)
       .def_readonly("last_rebuild_seconds", &LSystemPlantSceneMetadataRecord::last_rebuild_seconds)
       .def_readonly("last_rebuild_internode_seconds", &LSystemPlantSceneMetadataRecord::last_rebuild_internode_seconds)
@@ -1562,8 +1673,25 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
       .def_readonly("leaf_thickness_m", &LSystemPlantSceneMetadataRecord::leaf_thickness_m)
       .def_readonly("plant_height_m", &LSystemPlantSceneMetadataRecord::plant_height_m)
       .def_readonly("leaf_area_m2", &LSystemPlantSceneMetadataRecord::leaf_area_m2)
+      .def_readonly("panicle_tip_height_m", &LSystemPlantSceneMetadataRecord::panicle_tip_height_m)
+      .def_readonly("vegetative_canopy_height_m", &LSystemPlantSceneMetadataRecord::vegetative_canopy_height_m)
+      .def_readonly("panicle_canopy_clearance_m", &LSystemPlantSceneMetadataRecord::panicle_canopy_clearance_m)
+      .def_readonly("panicle_peduncle_length_m", &LSystemPlantSceneMetadataRecord::panicle_peduncle_length_m)
+      .def_readonly("panicle_rachis_length_m", &LSystemPlantSceneMetadataRecord::panicle_rachis_length_m)
+      .def_readonly("panicle_branch_length_m", &LSystemPlantSceneMetadataRecord::panicle_branch_length_m)
       .def_readonly("middle_parbar_top_elevation_m", &LSystemPlantSceneMetadataRecord::middle_parbar_top_elevation_m)
+      .def_readonly("vegetative_maturity_gdd", &LSystemPlantSceneMetadataRecord::vegetative_maturity_gdd)
+      .def_readonly("panicle_initiation_gdd", &LSystemPlantSceneMetadataRecord::panicle_initiation_gdd)
+      .def_readonly("panicle_maturity_gdd", &LSystemPlantSceneMetadataRecord::panicle_maturity_gdd)
+      .def_readonly("minimum_vegetative_growth_progress",
+                    &LSystemPlantSceneMetadataRecord::minimum_vegetative_growth_progress)
+      .def_readonly("minimum_panicle_growth_progress",
+                    &LSystemPlantSceneMetadataRecord::minimum_panicle_growth_progress)
       .def_readonly("has_geometry", &LSystemPlantSceneMetadataRecord::has_geometry)
+      .def_readonly("panicle_emerged", &LSystemPlantSceneMetadataRecord::panicle_emerged)
+      .def_readonly("vegetative_organs_mature", &LSystemPlantSceneMetadataRecord::vegetative_organs_mature)
+      .def_readonly("panicle_mature", &LSystemPlantSceneMetadataRecord::panicle_mature)
+      .def_readonly("all_organs_mature", &LSystemPlantSceneMetadataRecord::all_organs_mature)
       .def_readonly("axes", &LSystemPlantSceneMetadataRecord::axes);
 
   py::class_<SorghumMeshGeneratorSettings>(m, "SorghumMeshGeneratorSettings")
@@ -2072,16 +2200,26 @@ bool PyDigitalAgriculture::ConfigureRayTracerSkydome(const glm::vec3 sun_angles_
 
 bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, const int resolution_y,
                                                         const std::filesystem::path& output_path, const int samples,
-                                                        const int bounces, const float gamma) {
+                                                        const int bounces, const float gamma,
+                                                        const float denoiser_strength) {
 #  ifdef CUDA_MODULE_SERVICE
-  if (resolution_x <= 0 || resolution_y <= 0 || samples <= 0 || bounces < 0 || gamma <= 0.0f) {
+  if (resolution_x <= 0 || resolution_y <= 0 || samples <= 0 || bounces < 0 || gamma <= 0.0f ||
+      !std::isfinite(denoiser_strength) || denoiser_strength < 0.0f || denoiser_strength > 1.0f) {
     return false;
   }
   auto& application = ApplicationContext::Get();
   const auto scene = application.GetActiveScene();
   const auto layer = application.GetLayer<RayTracerLayer>();
   const auto main_camera = scene ? scene->main_camera.Get<Camera>() : nullptr;
-  if (!scene || !layer || !main_camera || CudaModule::GetRayTracer()->instances.empty()) {
+  if (!scene || !layer || !main_camera) {
+    return false;
+  }
+  // L-system geometry is often published immediately before a scripted
+  // capture.  Synchronize the OptiX scene explicitly instead of relying on a
+  // previous application frame, otherwise newly created reproductive meshes
+  // can be absent from the captured acceleration structure.
+  layer->UpdateScene(scene);
+  if (CudaModule::GetRayTracer()->instances.empty()) {
     return false;
   }
 
@@ -2097,6 +2235,7 @@ bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, 
   camera->ray_properties.samples = samples;
   camera->ray_properties.bounces = bounces;
   camera->SetGamma(gamma);
+  camera->SetDenoiserStrength(denoiser_strength);
   camera->Render(camera->ray_properties, layer->environment_properties);
 
   if (const auto parent = output_path.parent_path(); !parent.empty()) {
@@ -2107,6 +2246,112 @@ bool PyDigitalAgriculture::CaptureCurrentSceneRayTraced(const int resolution_x, 
 #  else
   return false;
 #  endif
+}
+
+size_t PyDigitalAgriculture::ConfigurePresentationGroundExtension(const bool enabled, const float size_m,
+                                                                  const float texture_repeat_m,
+                                                                  const float grid_spacing_m) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  constexpr const char* kPresentationGroundName = "__PresentationOnly_GroundExtension";
+  Entity extension = FindEntityByName(scene, kPresentationGroundName);
+  if (!enabled) {
+    if (scene->IsEntityValid(extension)) {
+      scene->DeleteEntity(extension);
+      if (const auto layer = ApplicationContext::Get().GetLayer<RayTracerLayer>()) {
+        layer->UpdateScene(scene);
+      }
+    }
+    return 0;
+  }
+  if (scene->IsEntityValid(extension)) {
+    return 1;
+  }
+  if (!std::isfinite(size_m) || !std::isfinite(texture_repeat_m) || !std::isfinite(grid_spacing_m) || size_m <= 0.0f ||
+      texture_repeat_m <= 0.0f || grid_spacing_m <= 0.0f) {
+    return 0;
+  }
+
+  const Entity ground = FindEntityByName(scene, "Ground Mesh");
+  const auto ground_renderer =
+      scene->IsEntityValid(ground) ? scene->GetOrSetPrivateComponent<MeshRenderer>(ground).lock() : nullptr;
+  const auto ground_mesh = ground_renderer ? ground_renderer->mesh.Get<Mesh>() : nullptr;
+  const auto ground_material = ground_renderer ? ground_renderer->material.Get<Material>() : nullptr;
+  if (!ground_mesh || !ground_material || ground_mesh->PeekVertices().empty()) {
+    return 0;
+  }
+
+  const auto ground_transform = scene->GetDataComponent<GlobalTransform>(ground);
+  glm::vec3 minimum(std::numeric_limits<float>::max());
+  glm::vec3 maximum(std::numeric_limits<float>::lowest());
+  for (const auto& vertex : ground_mesh->PeekVertices()) {
+    const glm::vec3 world_position = ground_transform.TransformPoint(vertex.position);
+    minimum = glm::min(minimum, world_position);
+    maximum = glm::max(maximum, world_position);
+  }
+  const float half_size = size_m * 0.5f;
+  const glm::vec2 center((minimum.x + maximum.x) * 0.5f, (minimum.z + maximum.z) * 0.5f);
+  const float y = minimum.y - 0.015f;
+  const double requested_cells = std::ceil(static_cast<double>(size_m) / static_cast<double>(grid_spacing_m));
+  constexpr size_t kMaximumGridCells = 2048;
+  if (requested_cells < 1.0 || requested_cells > static_cast<double>(kMaximumGridCells)) {
+    return 0;
+  }
+  const size_t grid_cells = static_cast<size_t>(requested_cells);
+  const size_t grid_resolution = grid_cells + 1;
+  const float cell_size = size_m / static_cast<float>(grid_cells);
+  const glm::mat4 inverse_ground = glm::inverse(ground_transform.value);
+  constexpr float kTwoPi = 6.28318530717958647692f;
+  const auto authored_uv = [&](const glm::vec3& world_position) {
+    const glm::vec3 local_position = glm::vec3(inverse_ground * glm::vec4(world_position, 1.0f));
+    return glm::vec2(local_position.x / texture_repeat_m + 0.16f * std::sin(kTwoPi * local_position.z / 7.3f) +
+                         0.07f * std::sin(kTwoPi * (local_position.x + local_position.z) / 3.9f),
+                     local_position.z / texture_repeat_m + 0.14f * std::sin(kTwoPi * local_position.x / 8.1f) -
+                         0.06f * std::sin(kTwoPi * (local_position.x - local_position.z) / 4.7f));
+  };
+
+  std::vector<Vertex> vertices(grid_resolution * grid_resolution);
+  for (size_t row = 0; row < grid_resolution; ++row) {
+    for (size_t column = 0; column < grid_resolution; ++column) {
+      auto& vertex = vertices[row * grid_resolution + column];
+      vertex.position = glm::vec3(center.x - half_size + static_cast<float>(column) * cell_size, y,
+                                  center.y - half_size + static_cast<float>(row) * cell_size);
+      vertex.normal = glm::vec3(0.0f, 1.0f, 0.0f);
+      vertex.tangent = glm::vec3(1.0f, 0.0f, 0.0f);
+      vertex.tex_coord = authored_uv(vertex.position);
+    }
+  }
+  std::vector<glm::uvec3> triangles;
+  triangles.reserve(grid_cells * grid_cells * 2);
+  for (size_t row = 0; row < grid_cells; ++row) {
+    for (size_t column = 0; column < grid_cells; ++column) {
+      const auto lower_left = static_cast<unsigned int>(row * grid_resolution + column);
+      const auto lower_right = lower_left + 1;
+      const auto upper_left = static_cast<unsigned int>((row + 1) * grid_resolution + column);
+      const auto upper_right = upper_left + 1;
+      triangles.emplace_back(lower_left, upper_right, lower_right);
+      triangles.emplace_back(lower_left, upper_left, upper_right);
+    }
+  }
+  const auto mesh = AssetManager::CreateTemporaryAsset<Mesh>();
+  VertexAttributes attributes{};
+  attributes.normal = true;
+  attributes.tangent = true;
+  attributes.tex_coord = true;
+  mesh->SetVertices(attributes, vertices, triangles);
+  mesh->ray_tracing_acceleration_enabled = true;
+
+  extension = scene->CreateEntity(kPresentationGroundName);
+  scene->SetEntitySerializable(extension, false);
+  const auto renderer = scene->GetOrSetPrivateComponent<MeshRenderer>(extension).lock();
+  renderer->mesh = mesh;
+  renderer->material = ground_material;
+  if (const auto layer = ApplicationContext::Get().GetLayer<RayTracerLayer>()) {
+    layer->UpdateScene(scene);
+  }
+  return 1;
 }
 
 std::array<uint64_t, 4> PyDigitalAgriculture::GetRayTracerBuildCounters() {
@@ -2185,6 +2430,12 @@ size_t PyDigitalAgriculture::GrowSorghumLsPlantsToGdd(const float evaluation_gdd
   return layer ? layer->RegenerateSorghumScene(evaluation_gdd, seed_base, update_render_geometry) : 0;
 }
 
+size_t PyDigitalAgriculture::AdvanceSorghumLsPlantsToGdd(const float evaluation_gdd, const int seed_base,
+                                                         const bool update_render_geometry) {
+  const auto layer = ApplicationContext::Get().GetLayer<LSystemLayer>();
+  return layer ? layer->AdvanceSorghumScene(evaluation_gdd, seed_base, update_render_geometry) : 0;
+}
+
 size_t PyDigitalAgriculture::MaterializeSorghumLsPlantGeometry(const bool update_render_geometry) {
   const auto layer = ApplicationContext::Get().GetLayer<LSystemLayer>();
   return layer ? layer->RestoreSorghumScene(update_render_geometry) : 0;
@@ -2252,20 +2503,143 @@ size_t PyDigitalAgriculture::SetSorghumLsLeafWidthScale(const float leaf_width_s
   return plant_count;
 }
 
-size_t PyDigitalAgriculture::SetSorghumLsCultivarDescriptors(const std::filesystem::path& btx_descriptor_path,
-                                                             const std::filesystem::path& pawaga_descriptor_path,
-                                                             const bool regenerate_geometry, const int seed_base) {
+size_t PyDigitalAgriculture::ConfigureSorghumLsLeafMeshQuality(const float vertical_subdivision_length,
+                                                               const int horizontal_subdivision_step,
+                                                               const bool bottom_face, const bool enable_leaf_sheath,
+                                                               const bool regenerate_geometry) {
   const auto scene = ApplicationContext::Get().GetActiveScene();
   if (!scene) {
     return 0;
   }
-  const auto btx_descriptor =
-      std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(btx_descriptor_path));
-  const auto pawaga_descriptor =
-      std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(pawaga_descriptor_path));
-  if (!btx_descriptor || !pawaga_descriptor) {
-    EVOENGINE_ERROR("SetSorghumLsCultivarDescriptors failed: missing calibrated descriptor asset")
+  const float vertical = std::max(0.001f, vertical_subdivision_length);
+  const int horizontal = std::max(2, horizontal_subdivision_step);
+  size_t plant_count = 0;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      if (!sorghum) {
+        continue;
+      }
+      sorghum->leaf_mesh_settings.vertical_subdivision_length = vertical;
+      sorghum->leaf_mesh_settings.horizontal_subdivision_step = horizontal;
+      sorghum->leaf_mesh_settings.enable_leaf_sheath = enable_leaf_sheath;
+      sorghum->leaf_bottom_face = bottom_face;
+      if (regenerate_geometry) {
+        sorghum->GenerateGeometryEntities(true);
+      }
+      ++plant_count;
+    }
+  }
+  if (plant_count > 0 && regenerate_geometry) {
+    TransformGraph::CalculateTransformGraphs(scene);
+  }
+  return plant_count;
+}
+
+size_t PyDigitalAgriculture::SetSorghumLsFinalizeSnapshotMorphology(const bool enabled) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
     return 0;
+  }
+  std::set<SorghumLSDescriptor*> descriptors;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      const auto descriptor = sorghum ? sorghum->descriptor_ref.Get<SorghumLSDescriptor>() : nullptr;
+      if (descriptor) {
+        descriptors.insert(descriptor.get());
+      }
+    }
+  }
+  for (const auto descriptor : descriptors) {
+    descriptor->finalize_snapshot_morphology = enabled;
+  }
+  return descriptors.size();
+}
+
+size_t PyDigitalAgriculture::ConfigureSorghumLsPaniclePresentation(
+    const float peduncle_length_m, const float rachis_length_m, const float branch_length_m,
+    const int primary_branch_count, const int spikelet_pairs_per_branch, const float spikelet_length_m,
+    const float spikelet_radius_m, const float immature_red, const float immature_green, const float immature_blue,
+    const float mature_red, const float mature_green, const float mature_blue) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  size_t plant_count = 0;
+  std::map<SorghumLSDescriptor*, std::shared_ptr<SorghumLSDescriptor>> clones;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+      const auto source = sorghum ? sorghum->descriptor_ref.Get<SorghumLSDescriptor>() : nullptr;
+      if (!sorghum || !source) {
+        continue;
+      }
+      auto& clone = clones[source.get()];
+      if (!clone) {
+        clone = CloneDescriptorTemporary(*source);
+        if (!clone) {
+          continue;
+        }
+        clone->panicle_peduncle_length_m =
+            evo_engine::SingleDistribution<float>{std::max(0.0f, peduncle_length_m), 0.0f};
+        clone->panicle_rachis_length_m = evo_engine::SingleDistribution<float>{std::max(0.02f, rachis_length_m), 0.0f};
+        clone->panicle_branch_length_m = evo_engine::SingleDistribution<float>{std::max(0.005f, branch_length_m), 0.0f};
+        clone->panicle_primary_branch_count =
+            evo_engine::SingleDistribution<float>{static_cast<float>(std::clamp(primary_branch_count, 1, 64)), 0.0f};
+        clone->panicle_spikelet_pairs_per_branch = evo_engine::SingleDistribution<float>{
+            static_cast<float>(std::clamp(spikelet_pairs_per_branch, 1, 32)), 0.0f};
+        clone->panicle_spikelet_length_m =
+            evo_engine::SingleDistribution<float>{std::max(0.001f, spikelet_length_m), 0.0f};
+        clone->panicle_spikelet_radius_m =
+            evo_engine::SingleDistribution<float>{std::max(0.0002f, spikelet_radius_m), 0.0f};
+        clone->panicle_immature_color =
+            glm::clamp(glm::vec3(immature_red, immature_green, immature_blue), glm::vec3(0.0f), glm::vec3(1.0f));
+        clone->panicle_mature_color =
+            glm::clamp(glm::vec3(mature_red, mature_green, mature_blue), glm::vec3(0.0f), glm::vec3(1.0f));
+      }
+      sorghum->descriptor_ref = clone;
+      ++plant_count;
+    }
+  }
+  return plant_count;
+}
+
+size_t PyDigitalAgriculture::SetSorghumLsCultivarDescriptors(const std::filesystem::path& btx_descriptor_path,
+                                                             const std::filesystem::path& pawaga_descriptor_path,
+                                                             const bool regenerate_geometry, const int seed_base) {
+  return SetSorghumLsGenotypeDescriptors({{"BTX", btx_descriptor_path}, {"Pawaga", pawaga_descriptor_path}},
+                                         regenerate_geometry, seed_base);
+}
+
+size_t PyDigitalAgriculture::SetSorghumLsGenotypeDescriptors(
+    const std::map<std::string, std::filesystem::path>& descriptor_paths, const bool regenerate_geometry,
+    const int seed_base) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || descriptor_paths.empty()) {
+    return 0;
+  }
+  std::map<std::string, std::shared_ptr<SorghumLSDescriptor>> descriptors;
+  for (const auto& [genotype, path] : descriptor_paths) {
+    if (genotype.empty()) {
+      EVOENGINE_ERROR("SetSorghumLsGenotypeDescriptors failed: empty genotype name")
+      return 0;
+    }
+    const auto descriptor = std::dynamic_pointer_cast<SorghumLSDescriptor>(ProjectManager::GetOrCreateAsset(path));
+    if (!descriptor) {
+      EVOENGINE_ERROR("SetSorghumLsGenotypeDescriptors failed: missing descriptor asset for " + genotype)
+      return 0;
+    }
+    descriptors.emplace(genotype, descriptor);
   }
 
   size_t plant_count = 0;
@@ -2276,22 +2650,22 @@ size_t PyDigitalAgriculture::SetSorghumLsCultivarDescriptors(const std::filesyst
       if (!scene->IsEntityValid(entity)) {
         continue;
       }
-      const std::string cultivar = CultivarFromPlantName(scene->GetEntityName(entity));
-      const auto descriptor = cultivar == "BTX" ? btx_descriptor : cultivar == "Pawaga" ? pawaga_descriptor : nullptr;
-      if (!descriptor) {
+      const std::string genotype = CultivarFromPlantName(scene->GetEntityName(entity));
+      const auto descriptor_it = descriptors.find(genotype);
+      if (descriptor_it == descriptors.end()) {
         continue;
       }
       const auto sorghum = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
       if (!sorghum) {
         continue;
       }
-      sorghum->descriptor_ref = descriptor;
+      sorghum->descriptor_ref = descriptor_it->second;
       if (seed_base >= 0) {
         sorghum->seed = static_cast<uint32_t>(seed_base) + reseed_index;
       }
       if (regenerate_geometry) {
         std::mt19937 rng(sorghum->seed);
-        sorghum->target_gdd = std::max(0.0f, SampleDistribution(descriptor->target_gdd, rng));
+        sorghum->target_gdd = std::max(0.0f, SampleDistribution(descriptor_it->second->target_gdd, rng));
         sorghum->GenerateGeometryEntities(true);
       }
       plant_count++;
@@ -2358,6 +2732,217 @@ size_t PyDigitalAgriculture::SetSorghumLsGridSpacing(const float spacing_x, cons
   }
   TransformGraph::CalculateTransformGraphs(scene);
   return targets.size();
+}
+
+size_t PyDigitalAgriculture::ConfigureSorghumLsPlantingGrid(const std::vector<std::string>& row_genotypes,
+                                                            const uint32_t columns, const float column_spacing_m,
+                                                            const float row_spacing_m, const float center_x_m,
+                                                            const float center_z_m) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || row_genotypes.empty() || columns == 0 || column_spacing_m <= 0.0f || row_spacing_m <= 0.0f) {
+    return 0;
+  }
+  if (std::any_of(row_genotypes.begin(), row_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    EVOENGINE_ERROR("ConfigureSorghumLsPlantingGrid: genotype names must be non-empty labels")
+    return 0;
+  }
+
+  std::vector<Entity> old_markers;
+  std::vector<Entity> old_parents;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    old_markers.emplace_back(entity);
+    const auto parent = scene->GetParent(entity);
+    if (scene->IsEntityValid(parent) &&
+        std::find(old_parents.begin(), old_parents.end(), parent) == old_parents.end()) {
+      old_parents.emplace_back(parent);
+    }
+  }
+  for (const auto& marker : old_markers) {
+    if (scene->IsEntityValid(marker)) {
+      scene->DeleteEntity(marker);
+    }
+  }
+  for (const auto& parent : old_parents) {
+    const std::string parent_name = scene->IsEntityValid(parent) ? scene->GetEntityName(parent) : std::string{};
+    if (scene->IsEntityValid(parent) && scene->GetChildren(parent).empty() && parent_name.size() >= 6 &&
+        parent_name.compare(parent_name.size() - 6, 6, "_Field") == 0) {
+      scene->DeleteEntity(parent);
+    }
+  }
+
+  Entity field_root = FindEntityByName(scene, "Sorghum2026_6x10_Field");
+  if (!scene->IsEntityValid(field_root)) {
+    field_root = scene->CreateEntity("Sorghum2026_6x10_Field");
+  }
+  const float center_row = 0.5f * static_cast<float>(row_genotypes.size() - 1);
+  const float center_column = 0.5f * static_cast<float>(columns - 1);
+  size_t marker_count = 0;
+  for (size_t row = 0; row < row_genotypes.size(); ++row) {
+    for (uint32_t column = 0; column < columns; ++column) {
+      const std::string name = row_genotypes[row] + "_LSystem_R" + std::to_string(row) + "_C" + std::to_string(column);
+      const Entity marker = scene->CreateEntity(name);
+      auto transform = scene->GetDataComponent<Transform>(marker);
+      transform.SetPosition(glm::vec3(center_x_m + (static_cast<float>(column) - center_column) * column_spacing_m,
+                                      0.0f, center_z_m + (static_cast<float>(row) - center_row) * row_spacing_m));
+      scene->SetDataComponent(marker, transform);
+      scene->SetParent(marker, field_root);
+      ++marker_count;
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return marker_count;
+}
+
+size_t PyDigitalAgriculture::RelabelSorghumLsPlantingMarkersByRow(const std::vector<std::string>& row_genotypes) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || row_genotypes.empty() ||
+      std::any_of(row_genotypes.begin(), row_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    return 0;
+  }
+
+  struct MarkerCoordinate {
+    Entity entity;
+    uint32_t row = 0;
+    uint32_t column = 0;
+  };
+  std::vector<MarkerCoordinate> markers;
+  std::set<std::pair<uint32_t, uint32_t>> coordinates;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    uint32_t row = 0;
+    uint32_t column = 0;
+    if (!TryParseGridCoordinate(scene->GetEntityName(entity), row, column) || row >= row_genotypes.size() ||
+        !coordinates.emplace(row, column).second) {
+      EVOENGINE_ERROR("RelabelSorghumLsPlantingMarkersByRow requires unique in-range grid markers")
+      return 0;
+    }
+    markers.push_back({entity, row, column});
+  }
+  if (markers.empty()) {
+    return 0;
+  }
+
+  for (const auto& marker : markers) {
+    scene->SetEntityName(marker.entity, row_genotypes[marker.row] + "_LSystem_R" + std::to_string(marker.row) + "_C" +
+                                            std::to_string(marker.column));
+  }
+  return markers.size();
+}
+
+size_t PyDigitalAgriculture::ConfigureSorghumLsReplicatedSixByTenProfile(
+    const std::vector<std::string>& block_genotypes) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || block_genotypes.size() != 3 ||
+      std::any_of(block_genotypes.begin(), block_genotypes.end(), [](const std::string& genotype) {
+        return genotype.empty() || genotype.find("_LSystem_") != std::string::npos;
+      })) {
+    return 0;
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  auto first_block = CollectManualTwoByTenBlock(scene, "BTX");
+  auto second_block = CollectManualTwoByTenBlock(scene, "Pawaga");
+  const Entity first_rig = FindEntityByName(scene, "PARBAR_BTX");
+  const Entity second_rig = FindEntityByName(scene, "PARBAR_Pawaga");
+  if (first_block.empty() || second_block.empty() || !scene->IsEntityValid(first_rig) ||
+      !scene->IsEntityValid(second_rig)) {
+    EVOENGINE_ERROR("ConfigureSorghumLsReplicatedSixByTenProfile requires the manual BTX/Pawaga 4x10 profile")
+    return 0;
+  }
+
+  const glm::vec3 block_offset =
+      glm::vec3(MeanPosition(second_block) - MeanPosition(first_block)) * glm::vec3(1.0f, 0.0f, 1.0f);
+  auto rig_prefab = AssetManager::CreateTemporaryAsset<Prefab>();
+  rig_prefab->FromEntity(second_rig);
+  const Entity third_rig = rig_prefab->ToEntity(scene);
+  auto third_rig_transform = scene->GetDataComponent<Transform>(third_rig);
+  third_rig_transform.SetPosition(third_rig_transform.GetPosition() + block_offset);
+  scene->SetDataComponent(third_rig, third_rig_transform);
+  RenameEntityHierarchyPrefix(scene, first_rig, "PARBAR_BTX", "PARBAR_" + block_genotypes[0]);
+  RenameEntityHierarchyPrefix(scene, second_rig, "PARBAR_Pawaga", "PARBAR_" + block_genotypes[1]);
+  RenameEntityHierarchyPrefix(scene, third_rig, "PARBAR_Pawaga", "PARBAR_" + block_genotypes[2]);
+
+  std::vector<Entity> old_markers;
+  std::vector<Entity> old_parents;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || !IsSorghumPlantingMarkerName(scene->GetEntityName(entity))) {
+      continue;
+    }
+    old_markers.emplace_back(entity);
+    const auto parent = scene->GetParent(entity);
+    if (scene->IsEntityValid(parent) &&
+        std::find(old_parents.begin(), old_parents.end(), parent) == old_parents.end()) {
+      old_parents.emplace_back(parent);
+    }
+  }
+  for (const auto& marker : old_markers) {
+    scene->DeleteEntity(marker);
+  }
+  for (const auto& parent : old_parents) {
+    if (scene->IsEntityValid(parent) && scene->GetChildren(parent).empty()) {
+      scene->DeleteEntity(parent);
+    }
+  }
+
+  auto third_block = second_block;
+  for (auto& row : third_block) {
+    for (auto& position : row) {
+      position += block_offset;
+    }
+  }
+  const Entity field_root = scene->CreateEntity("Sorghum2026_6x10_Field");
+  const std::vector<std::vector<std::vector<glm::vec3>>> blocks = {first_block, second_block, third_block};
+  size_t marker_count = 0;
+  for (size_t block = 0; block < blocks.size(); ++block) {
+    for (size_t block_row = 0; block_row < blocks[block].size(); ++block_row) {
+      const size_t row = block * 2 + block_row;
+      for (size_t column = 0; column < blocks[block][block_row].size(); ++column) {
+        const Entity marker = scene->CreateEntity(block_genotypes[block] + "_LSystem_R" + std::to_string(row) + "_C" +
+                                                  std::to_string(column));
+        auto transform = scene->GetDataComponent<Transform>(marker);
+        transform.SetPosition(blocks[block][block_row][column]);
+        scene->SetDataComponent(marker, transform);
+        scene->SetParent(marker, field_root);
+        ++marker_count;
+      }
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return marker_count;
+}
+
+size_t PyDigitalAgriculture::RemoveParbarContext() {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  std::vector<Entity> roots;
+  size_t entity_count = 0;
+  for (const auto& entity : scene->UnsafeGetAllEntities()) {
+    if (!scene->IsEntityValid(entity) || scene->GetEntityName(entity).rfind("PARBAR_", 0) != 0) {
+      continue;
+    }
+    ++entity_count;
+    const Entity parent = scene->GetParent(entity);
+    if (!scene->IsEntityValid(parent) || scene->GetEntityName(parent).rfind("PARBAR_", 0) != 0) {
+      roots.emplace_back(entity);
+    }
+  }
+  for (const auto& root : roots) {
+    if (scene->IsEntityValid(root)) {
+      scene->DeleteEntity(root);
+    }
+  }
+  TransformGraph::CalculateTransformGraphs(scene, false);
+  return entity_count;
 }
 
 size_t PyDigitalAgriculture::ConformSorghumLsPlantsToGroundMesh() {
@@ -2548,6 +3133,13 @@ std::vector<LSystemPlantSceneMetadataRecord> PyDigitalAgriculture::GetSorghumLsP
   if (measure_geometry) {
     for (const auto& panel : kParbarPanels) {
       if (IsMiddleParbarPanel(panel)) {
+        Entity root = FindEntityByName(scene, panel.root);
+        if (!scene->IsEntityValid(root)) {
+          root = FindEntityByName(scene, std::string(panel.root) + "_SensorRig");
+        }
+        if (!scene->IsEntityValid(root)) {
+          continue;
+        }
         middle_panel_elevations[panel.cultivar] =
             TopFaceElevation(CollectTopFaceTriangles(scene, FindParbarMeshEntity(scene, panel)));
       }
@@ -2591,28 +3183,98 @@ std::vector<LSystemPlantSceneMetadataRecord> PyDigitalAgriculture::GetSorghumLsP
         record.leaf_triangle_count = static_cast<uint32_t>(snapshot->leaf_triangles.size());
         record.culm_vertex_count = static_cast<uint32_t>(snapshot->culm_vertices.size());
         record.culm_triangle_count = static_cast<uint32_t>(snapshot->culm_triangles.size());
+        record.panicle_vertex_count = static_cast<uint32_t>(snapshot->panicle_vertices.size());
+        record.panicle_triangle_count = static_cast<uint32_t>(snapshot->panicle_triangles.size());
       }
       record.leaf_width_scale = sorghum->leaf_mesh_settings.leaf_width_scale;
+      record.vegetative_maturity_gdd = sorghum->growth_model.sampled.maturity_gdd;
+      record.panicle_initiation_gdd = sorghum->growth_model.sampled.panicle_initiation_gdd;
+      record.panicle_maturity_gdd = sorghum->growth_model.sampled.panicle_maturity_gdd;
+      record.panicle_peduncle_length_m = sorghum->growth_model.sampled.panicle_peduncle_length_m;
+      record.panicle_rachis_length_m = sorghum->growth_model.sampled.panicle_rachis_length_m;
+      record.panicle_branch_length_m = sorghum->growth_model.sampled.panicle_branch_length_m;
       float blade_thickness_sum = 0.0f;
       int blade_thickness_count = 0;
+      float minimum_vegetative_growth_progress = 1.0f;
+      float minimum_panicle_growth_progress = 1.0f;
+      constexpr float kMaturityEpsilon = 1.0e-4f;
       for (const auto handle : sorghum->growth_model.graph.PeekSortedNodeList()) {
         const auto& node = sorghum->growth_model.graph.PeekNode(handle);
-        if (node.data.Is<SorghumLeaf>() && node.data.Get<SorghumLeaf>().order == 0) {
-          blade_thickness_sum += node.data.Get<SorghumLeaf>().target_blade_thickness;
-          ++blade_thickness_count;
+        if (node.data.Is<SorghumInternode>()) {
+          const float progress = node.data.Get<SorghumInternode>().growth_progress;
+          ++record.vegetative_organ_count;
+          minimum_vegetative_growth_progress = std::min(minimum_vegetative_growth_progress, progress);
+          record.immature_vegetative_organ_count += progress < 1.0f - kMaturityEpsilon ? 1 : 0;
+        } else if (node.data.Is<SorghumLeaf>()) {
+          const auto& leaf = node.data.Get<SorghumLeaf>();
+          ++record.vegetative_organ_count;
+          minimum_vegetative_growth_progress = std::min(minimum_vegetative_growth_progress, leaf.growth_progress);
+          record.immature_vegetative_organ_count +=
+              !leaf.maturity_reached || leaf.growth_progress < 1.0f - kMaturityEpsilon ? 1 : 0;
+          if (leaf.order == 0) {
+            blade_thickness_sum += leaf.target_blade_thickness;
+            ++blade_thickness_count;
+          }
+        } else if (node.data.Is<SorghumApex>() || node.data.Is<SorghumTillerBud>() ||
+                   node.data.Is<SorghumPanicleBud>()) {
+          ++record.developmental_module_count;
         }
       }
+      record.minimum_vegetative_growth_progress =
+          record.vegetative_organ_count > 0 ? minimum_vegetative_growth_progress : 0.0f;
+      record.vegetative_organs_mature =
+          record.vegetative_organ_count > 0 && record.immature_vegetative_organ_count == 0;
       record.leaf_thickness_m =
           blade_thickness_count > 0 ? blade_thickness_sum / static_cast<float>(blade_thickness_count) : 0.0f;
+      float panicle_tip_y = record.global_position.y;
+      for (const auto handle : sorghum->growth_model.graph.PeekSortedNodeList()) {
+        const auto& node = sorghum->growth_model.graph.PeekNode(handle);
+        if (node.data.Is<SorghumPanicleRachis>()) {
+          const float progress = node.data.Get<SorghumPanicleRachis>().growth_progress;
+          record.panicle_emerged = true;
+          ++record.panicle_organ_count;
+          minimum_panicle_growth_progress = std::min(minimum_panicle_growth_progress, progress);
+          record.immature_panicle_organ_count += progress < 1.0f - kMaturityEpsilon ? 1 : 0;
+          panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
+        } else if (node.data.Is<SorghumPanicleBranch>()) {
+          const auto& branch = node.data.Get<SorghumPanicleBranch>();
+          ++record.panicle_branch_count;
+          ++record.panicle_organ_count;
+          minimum_panicle_growth_progress = std::min(minimum_panicle_growth_progress, branch.growth_progress);
+          record.immature_panicle_organ_count += branch.growth_progress < 1.0f - kMaturityEpsilon ? 1 : 0;
+          record.developmental_module_count += branch.spikelets_emitted ? 0 : 1;
+          panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
+        } else if (node.data.Is<SorghumPanicleSpikelet>()) {
+          const float progress = node.data.Get<SorghumPanicleSpikelet>().growth_progress;
+          ++record.panicle_spikelet_count;
+          ++record.panicle_organ_count;
+          minimum_panicle_growth_progress = std::min(minimum_panicle_growth_progress, progress);
+          record.immature_panicle_organ_count += progress < 1.0f - kMaturityEpsilon ? 1 : 0;
+          panicle_tip_y = std::max({panicle_tip_y, node.info.global_position.y, node.info.GetGlobalEndPosition().y});
+        }
+      }
+      record.minimum_panicle_growth_progress = record.panicle_organ_count > 0 ? minimum_panicle_growth_progress : 0.0f;
+      record.panicle_mature =
+          record.panicle_emerged && record.panicle_organ_count > 0 && record.immature_panicle_organ_count == 0;
+      record.all_organs_mature =
+          record.vegetative_organs_mature && record.panicle_mature && record.developmental_module_count == 0;
+      if (record.panicle_emerged) {
+        record.panicle_tip_height_m = std::max(0.0f, panicle_tip_y - record.global_position.y);
+      }
     }
     if (measure_geometry) {
       const auto stats = MeasureGreenPlantGeometry(scene, plant);
       const auto root_position = scene->GetDataComponent<GlobalTransform>(plant).GetPosition();
       record.has_geometry = stats.has_geometry;
       record.plant_height_m = stats.has_geometry ? std::max(0.0f, stats.max_y - root_position.y) : 0.0f;
+      record.vegetative_canopy_height_m = record.plant_height_m;
       record.leaf_area_m2 = stats.leaf_area;
       record.geometry_min_position = stats.has_geometry ? stats.min_position : root_position;
       record.geometry_max_position = stats.has_geometry ? stats.max_position : root_position;
+      if (record.panicle_emerged) {
+        record.panicle_canopy_clearance_m = record.panicle_tip_height_m - record.vegetative_canopy_height_m;
+        record.plant_height_m = std::max(record.plant_height_m, record.panicle_tip_height_m);
+      }
       if (const auto panel = middle_panel_elevations.find(record.cultivar); panel != middle_panel_elevations.end()) {
         record.middle_parbar_top_elevation_m = panel->second;
       }

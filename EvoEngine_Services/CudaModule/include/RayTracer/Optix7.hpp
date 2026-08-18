@@ -7,7 +7,7 @@
 #include "sstream"
 #include "string"
 
-#define ENABLE_OPTIX_DENOISER false
+#define ENABLE_OPTIX_DENOISER true
 
 #define CUDA_CHECK(call)                                                                                    \
   {                                                                                                         \

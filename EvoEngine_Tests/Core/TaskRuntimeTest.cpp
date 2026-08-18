@@ -3,6 +3,8 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <chrono>
+#include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <thread>
@@ -70,6 +72,26 @@ TEST(TaskRuntime, CompletedHandleRemainsCompletedAfterWaitRecyclesIt) {
 
   runtime.Wait(task);
   EXPECT_TRUE(runtime.IsCompleted(task));
+}
+
+TEST(TaskRuntime, ReleasesCallableCapturesWhenTaskCompletesWithoutWait) {
+  TaskRuntime runtime;
+  runtime.Initialize(TestRuntimeSettings());
+
+  auto payload = std::make_shared<int>(42);
+  const std::weak_ptr<int> weak_payload = payload;
+  const auto task = runtime.Schedule([payload]() {});
+  runtime.Execute(task);
+  payload.reset();
+
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(1);
+  while (!weak_payload.expired() && std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_TRUE(runtime.IsCompleted(task));
+  EXPECT_TRUE(weak_payload.expired());
+  runtime.Wait(task);
 }
 
 TEST(TaskRuntime, RunsNamedServiceExecutors) {

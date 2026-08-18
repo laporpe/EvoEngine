@@ -74,9 +74,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--repo-root", type=Path, default=repo)
     parser.add_argument("--build-dir", type=Path, default=repo / "out" / "build" / "vs2026-x64")
-    parser.add_argument("--config", default="RelWithDebInfo")
+    parser.add_argument("--config", default="Release")
     parser.add_argument("--project", type=Path, default=project_root / "test_lsystem_sorghum_10x10_overlap.eveproj")
-    parser.add_argument("--runtime-package-dir", type=Path, default=repo / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "RelWithDebInfo" / "Packages")
+    parser.add_argument("--runtime-package-dir", type=Path, default=repo / "out" / "build" / "vs2026-x64" / "EvoEngine_App" / "Release" / "Packages")
     parser.add_argument("--scene", type=Path, default=Path("GeneratedAssets/Scenes/Sorghum_10x10_Mature.evescene"))
     parser.add_argument("--output-dir", type=Path, default=repo / "out" / "realism_review" / "sorghum_4x10" / review.DRIVE_FOLDER_NAME)
     parser.add_argument("--width", type=int, default=3840)
@@ -99,7 +99,12 @@ def main() -> None:
         proxy_path.unlink(missing_ok=True)
         proxy_meta.unlink(missing_ok=True)
         if completed.returncode:
-            raise RuntimeError(f"10x10 render worker exited with code {completed.returncode}")
+            manifest_path = args.output_dir / "manifest.json"
+            manifest = json.loads(manifest_path.read_text(encoding="utf-8")) if manifest_path.exists() else {}
+            views = manifest.get("ten_by_ten", {}).get("views", [])
+            if len(views) != len(VIEWS) or any(not (args.output_dir / view["file"]).is_file() for view in views):
+                raise RuntimeError(f"10x10 render worker exited with code {completed.returncode}")
+            print(f"10x10 worker exited during engine shutdown ({completed.returncode}); renders verified")
         if args.publish_drive:
             review.publish_to_drive(args.output_dir, review.DEFAULT_DRIVE_OUTPUT_DIR)
         print("10x10_views=5")

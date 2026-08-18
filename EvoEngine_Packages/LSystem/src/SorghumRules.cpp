@@ -105,6 +105,11 @@ inline float ComputePlastochronGdd(const SampledSorghumParams& params, const int
   return std::max(1.0f, base * axis_scale * maturity_scale);
 }
 
+inline float PanicleGrowthProgress(const float age_gdd, const float maturity_gdd) {
+  const float t = std::clamp(age_gdd / std::max(1.0f, maturity_gdd), 0.0f, 1.0f);
+  return t * t * (3.0f - 2.0f * t);
+}
+
 }  // namespace
 
 // ---------------------------------------------------------------------------
@@ -204,6 +209,13 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         leaf.target_curling = SamplePlotted(params.leaf_curling, t_pos, node_rng);
         leaf.target_bending = SamplePlotted(params.leaf_bending, t_pos, node_rng);
         leaf.target_waviness = std::max(0.0f, SamplePlotted(params.leaf_waviness, t_pos, node_rng));
+        leaf.is_flag_leaf = rank == total_nodes - 1;
+        if (leaf.is_flag_leaf) {
+          leaf.target_blade_length *= params.flag_leaf_length_scale;
+          leaf.target_blade_max_width *= params.flag_leaf_width_scale;
+          leaf.target_insertion_angle_deg += params.flag_leaf_insertion_angle_offset;
+          leaf.target_bending *= params.flag_leaf_bending_scale;
+        }
         leaf.waviness_frequency = std::max(0.0f, params.leaf_waviness_frequency);
 
         auto twist_rng = MakeNodeRng(leaf.node_random, 0xA1735C91u);
@@ -289,8 +301,6 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
   // -------------------------------------------------------------------------
   // R-Apex-Terminate (main culm)
   //   Apex(order=0, vigor<=0) -> PanicleBud{}
-  //
-  //   Placeholder symbol; future panicle grammar plugs in here.
   // -------------------------------------------------------------------------
   {
     SorghumRule rule;
@@ -300,16 +310,119 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
       const auto& apex = ctx.self.data.Get<SorghumApex>();
       return apex.order == 0 && apex.vigor <= 0;
     };
-    rule.produce = [](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
       const auto& apex = ctx.self.data.Get<SorghumApex>();
       ProductionResult<SorghumModuleData> result;
+      if (!params.enable_panicle) {
+        return result;
+      }
       Successor<SorghumModuleData> s;
       s.is_branch = false;
       SorghumPanicleBud pb;
       pb.node_random = apex.node_random;
+      pb.initiation_gdd = params.panicle_initiation_gdd;
       s.data.Set<SorghumPanicleBud>(pb);
       s.symbol_id = SorghumSymbol::PanicleBud;
       result.successors.push_back(std::move(s));
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleBud;
+    rule.priority = 0;
+    rule.condition = [](const RuleContext<SorghumGraph>& ctx) -> bool {
+      const auto& bud = ctx.self.data.Get<SorghumPanicleBud>();
+      return bud.age_gdd >= bud.initiation_gdd;
+    };
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      const auto& bud = ctx.self.data.Get<SorghumPanicleBud>();
+      auto node_rng = MakeNodeRng(bud.node_random, 0xB591C731u);
+      ProductionResult<SorghumModuleData> result;
+
+      Successor<SorghumModuleData> rachis_successor;
+      SorghumPanicleRachis rachis;
+      // The lower unbranched portion is the peduncle that exserts the head
+      // from the flag-leaf sheath.  Branches attach only above that segment.
+      rachis.target_length = params.panicle_peduncle_length_m + params.panicle_rachis_length_m;
+      rachis.target_thickness = params.panicle_rachis_radius_m * 2.0f;
+      rachis.node_random = SampleUnit01(node_rng);
+      rachis_successor.data.Set<SorghumPanicleRachis>(rachis);
+      rachis_successor.symbol_id = SorghumSymbol::PanicleRachis;
+      result.successors.emplace_back(std::move(rachis_successor));
+
+      const int branch_count = std::max(1, params.panicle_primary_branch_count);
+      const float rachis_total_length = std::max(1.0e-5f, rachis.target_length);
+      for (int rank = 0; rank < branch_count; ++rank) {
+        const float t = (static_cast<float>(rank) + 0.5f) / static_cast<float>(branch_count);
+        const float envelope = params.panicle_branch_length_taper +
+                               (1.0f - params.panicle_branch_length_taper) * std::sin(glm::pi<float>() * t);
+        Successor<SorghumModuleData> branch_successor;
+        branch_successor.is_branch = true;
+        SorghumPanicleBranch branch;
+        branch.attachment_fraction =
+            (params.panicle_peduncle_length_m + t * params.panicle_rachis_length_m) / rachis_total_length;
+        branch.target_length = params.panicle_branch_length_m * envelope;
+        branch.target_thickness = params.panicle_branch_radius_m * 2.0f * (0.80f + 0.20f * (1.0f - t));
+        branch.branch_angle = params.panicle_branch_angle_degrees * (0.80f + 0.20f * (1.0f - t));
+        branch.roll_angle = NormalizeDegrees(137.50776f * static_cast<float>(rank) + SampleUnit01(node_rng) * 12.0f);
+        branch.rank = rank;
+        branch.spikelet_pair_count = std::max(1, params.panicle_spikelet_pairs_per_branch);
+        branch.node_random = SampleUnit01(node_rng);
+        branch_successor.data.Set<SorghumPanicleBranch>(branch);
+        branch_successor.symbol_id = SorghumSymbol::PanicleBranch;
+        result.successors.emplace_back(std::move(branch_successor));
+      }
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleBranch;
+    rule.priority = 0;
+    rule.condition = [](const RuleContext<SorghumGraph>& ctx) -> bool {
+      return !ctx.self.data.Get<SorghumPanicleBranch>().spikelets_emitted;
+    };
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      auto branch = ctx.self.data.Get<SorghumPanicleBranch>();
+      auto node_rng = MakeNodeRng(branch.node_random, 0x63D521A9u);
+      ProductionResult<SorghumModuleData> result;
+
+      branch.spikelets_emitted = true;
+      Successor<SorghumModuleData> branch_successor;
+      branch_successor.data.Set<SorghumPanicleBranch>(branch);
+      branch_successor.symbol_id = SorghumSymbol::PanicleBranch;
+      result.successors.emplace_back(std::move(branch_successor));
+
+      const int pair_count = std::max(1, branch.spikelet_pair_count);
+      // A sorghum spikelet unit is a triad: one central sessile spikelet and
+      // two flanking pedicellate spikelets.  Keep every member attached at the
+      // same branch position, then separate the two pedicellates azimuthally.
+      for (int pair_rank = 0; pair_rank < pair_count; ++pair_rank) {
+        const float t = (static_cast<float>(pair_rank) + 0.5f) / static_cast<float>(pair_count);
+        for (int member = 0; member < 3; ++member) {
+          const bool pedicellate = member > 0;
+          Successor<SorghumModuleData> spikelet_successor;
+          spikelet_successor.is_branch = true;
+          SorghumPanicleSpikelet spikelet;
+          spikelet.attachment_fraction = t;
+          spikelet.branch_rank = branch.rank;
+          spikelet.pedicellate = pedicellate;
+          spikelet.target_pedicel_length = pedicellate ? params.panicle_pedicel_length_m : 0.0f;
+          spikelet.target_spikelet_length = params.panicle_spikelet_length_m;
+          spikelet.target_radius = params.panicle_spikelet_radius_m;
+          spikelet.branch_angle = pedicellate ? 35.0f : 0.0f;
+          spikelet.roll_angle = member == 1 ? 90.0f : member == 2 ? -90.0f : 0.0f;
+          spikelet.node_random = SampleUnit01(node_rng);
+          spikelet_successor.data.Set<SorghumPanicleSpikelet>(spikelet);
+          spikelet_successor.symbol_id = SorghumSymbol::PanicleSpikelet;
+          result.successors.emplace_back(std::move(spikelet_successor));
+        }
+      }
       return result;
     };
     rules.push_back(std::move(rule));
@@ -579,11 +692,16 @@ std::vector<SorghumRule> CreateSorghumGrowthRules(const SampledSorghumParams& pa
       const float maturity_gdd = std::max(1.0f, params.maturity_gdd);
       const float age_t =
           std::clamp(internode.age_gdd * std::max(1.0f, internode.development_rate_scale) / maturity_gdd, 0.0f, 1.0f);
+      const bool mature = age_t >= 1.0f - 1.0e-4f;
 
-      const float length_progress = EvaluatePlottedDeterministic(
-          params.internode_elongation_curve, age_t, internode.node_random, kInternodeElongationSalt, 0.0f, 1.0f);
-      const float thickness_progress = EvaluatePlottedDeterministic(
-          params.internode_thickness_curve, age_t, internode.node_random, kInternodeThicknessSalt, 0.0f, 1.0f);
+      const float length_progress =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.internode_elongation_curve, age_t, internode.node_random,
+                                                kInternodeElongationSalt, 0.0f, 1.0f);
+      const float thickness_progress =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.internode_thickness_curve, age_t, internode.node_random,
+                                                kInternodeThicknessSalt, 0.0f, 1.0f);
 
       internode.growth_progress = length_progress;
       internode.length = internode.target_length * length_progress;
@@ -622,25 +740,44 @@ std::vector<SorghumRule> CreateSorghumGrowthRules(const SampledSorghumParams& pa
       const float maturity_gdd = std::max(1.0f, params.maturity_gdd);
       const float age_t =
           std::clamp(leaf.age_gdd * std::max(1.0f, leaf.development_rate_scale) / maturity_gdd, 0.0f, 1.0f);
+      const bool mature = leaf.maturity_reached || age_t >= 1.0f - 1.0e-4f;
 
-      const float sheath_length_t = EvaluatePlottedDeterministic(
-          params.leaf_sheath_length_growth_curve, age_t, leaf.node_random, kLeafSheathLengthGrowthSalt, 0.0f, 1.0f);
-      const float neck_length_t = EvaluatePlottedDeterministic(params.leaf_neck_length_growth_curve, age_t,
-                                                               leaf.node_random, kLeafNeckLengthGrowthSalt, 0.0f, 1.0f);
-      const float blade_length_t = EvaluatePlottedDeterministic(params.leaf_blade_growth_curve, age_t, leaf.node_random,
-                                                                kLeafBladeGrowthSalt, 0.0f, 1.0f);
-      const float sheath_width_t = EvaluatePlottedDeterministic(
-          params.leaf_sheath_width_growth_curve, age_t, leaf.node_random, kLeafSheathWidthGrowthSalt, 0.0f, 1.0f);
-      const float neck_width_t = EvaluatePlottedDeterministic(params.leaf_neck_width_growth_curve, age_t,
-                                                              leaf.node_random, kLeafNeckWidthGrowthSalt, 0.0f, 1.0f);
-      const float blade_width_t = EvaluatePlottedDeterministic(params.leaf_width_growth_curve, age_t, leaf.node_random,
-                                                               kLeafWidthGrowthSalt, 0.0f, 1.0f);
-      const float angle_t = EvaluatePlottedDeterministic(params.leaf_angle_development_curve, age_t, leaf.node_random,
-                                                         kLeafAngleDevelopmentSalt, 0.0f, 1.0f);
-      const float curl_t = EvaluatePlottedDeterministic(params.leaf_curling_development_curve, age_t, leaf.node_random,
-                                                        kLeafCurlingDevelopmentSalt, 0.0f, 1.0f);
-      const float bend_t = EvaluatePlottedDeterministic(params.leaf_bending_development_curve, age_t, leaf.node_random,
-                                                        kLeafBendingDevelopmentSalt, 0.0f, 1.0f);
+      const float sheath_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_sheath_length_growth_curve, age_t, leaf.node_random,
+                                                kLeafSheathLengthGrowthSalt, 0.0f, 1.0f);
+      const float neck_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_neck_length_growth_curve, age_t, leaf.node_random,
+                                                kLeafNeckLengthGrowthSalt, 0.0f, 1.0f);
+      const float blade_length_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_blade_growth_curve, age_t, leaf.node_random,
+                                                kLeafBladeGrowthSalt, 0.0f, 1.0f);
+      const float sheath_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_sheath_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafSheathWidthGrowthSalt, 0.0f, 1.0f);
+      const float neck_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_neck_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafNeckWidthGrowthSalt, 0.0f, 1.0f);
+      const float blade_width_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_width_growth_curve, age_t, leaf.node_random,
+                                                kLeafWidthGrowthSalt, 0.0f, 1.0f);
+      const float angle_t = mature
+                                ? 1.0f
+                                : EvaluatePlottedDeterministic(params.leaf_angle_development_curve, age_t,
+                                                               leaf.node_random, kLeafAngleDevelopmentSalt, 0.0f, 1.0f);
+      const float curl_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_curling_development_curve, age_t, leaf.node_random,
+                                                kLeafCurlingDevelopmentSalt, 0.0f, 1.0f);
+      const float bend_t =
+          mature ? 1.0f
+                 : EvaluatePlottedDeterministic(params.leaf_bending_development_curve, age_t, leaf.node_random,
+                                                kLeafBendingDevelopmentSalt, 0.0f, 1.0f);
 
       leaf.growth_progress = blade_length_t;
       leaf.sheath_length = leaf.target_sheath_length * sheath_length_t;
@@ -660,6 +797,84 @@ std::vector<SorghumRule> CreateSorghumGrowthRules(const SampledSorghumParams& pa
 
       s.data.Set<SorghumLeaf>(leaf);
       result.successors.push_back(std::move(s));
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleBud;
+    rule.priority = 0;
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      auto bud = ctx.self.data.Get<SorghumPanicleBud>();
+      bud.age_gdd += params.gdd_step;
+      ProductionResult<SorghumModuleData> result;
+      Successor<SorghumModuleData> successor;
+      successor.data.Set<SorghumPanicleBud>(bud);
+      successor.symbol_id = SorghumSymbol::PanicleBud;
+      result.successors.emplace_back(std::move(successor));
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleRachis;
+    rule.priority = 0;
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      auto rachis = ctx.self.data.Get<SorghumPanicleRachis>();
+      rachis.age_gdd += params.gdd_step;
+      rachis.growth_progress = PanicleGrowthProgress(rachis.age_gdd, params.panicle_maturity_gdd);
+      rachis.length = rachis.target_length * rachis.growth_progress;
+      rachis.thickness = rachis.target_thickness * (0.35f + 0.65f * rachis.growth_progress);
+      ProductionResult<SorghumModuleData> result;
+      Successor<SorghumModuleData> successor;
+      successor.data.Set<SorghumPanicleRachis>(rachis);
+      successor.symbol_id = SorghumSymbol::PanicleRachis;
+      result.successors.emplace_back(std::move(successor));
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleBranch;
+    rule.priority = 0;
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      auto branch = ctx.self.data.Get<SorghumPanicleBranch>();
+      branch.age_gdd += params.gdd_step;
+      branch.growth_progress = PanicleGrowthProgress(branch.age_gdd, params.panicle_maturity_gdd);
+      branch.length = branch.target_length * branch.growth_progress;
+      branch.thickness = branch.target_thickness * (0.35f + 0.65f * branch.growth_progress);
+      ProductionResult<SorghumModuleData> result;
+      Successor<SorghumModuleData> successor;
+      successor.data.Set<SorghumPanicleBranch>(branch);
+      successor.symbol_id = SorghumSymbol::PanicleBranch;
+      result.successors.emplace_back(std::move(successor));
+      return result;
+    };
+    rules.push_back(std::move(rule));
+  }
+
+  {
+    SorghumRule rule;
+    rule.predecessor_symbol = SorghumSymbol::PanicleSpikelet;
+    rule.priority = 0;
+    rule.produce = [params](RuleContext<SorghumGraph>& ctx) -> ProductionResult<SorghumModuleData> {
+      auto spikelet = ctx.self.data.Get<SorghumPanicleSpikelet>();
+      spikelet.age_gdd += params.gdd_step;
+      spikelet.growth_progress = PanicleGrowthProgress(spikelet.age_gdd, params.panicle_maturity_gdd);
+      spikelet.pedicel_length = spikelet.target_pedicel_length * spikelet.growth_progress;
+      spikelet.spikelet_length = spikelet.target_spikelet_length * spikelet.growth_progress;
+      spikelet.radius = spikelet.target_radius * spikelet.growth_progress;
+      ProductionResult<SorghumModuleData> result;
+      Successor<SorghumModuleData> successor;
+      successor.data.Set<SorghumPanicleSpikelet>(spikelet);
+      successor.symbol_id = SorghumSymbol::PanicleSpikelet;
+      result.successors.emplace_back(std::move(successor));
       return result;
     };
     rules.push_back(std::move(rule));

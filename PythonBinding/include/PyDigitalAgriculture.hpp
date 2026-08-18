@@ -117,6 +117,8 @@ struct LSystemLeafPhenotypeRecord {
   float target_blade_length_m = 0.0f;
   float blade_width_m = 0.0f;
   float target_blade_width_m = 0.0f;
+  float insertion_angle_degrees = 0.0f;
+  float target_insertion_angle_degrees = 0.0f;
   float collar_height_m = 0.0f;
   float tip_height_m = 0.0f;
   float maximum_height_m = 0.0f;
@@ -127,6 +129,7 @@ struct LSystemLeafPhenotypeRecord {
   float centerline_arc_to_chord_ratio = 1.0f;
   float surface_waviness_rms_m = 0.0f;
   bool alive = false;
+  bool is_flag_leaf = false;
 };
 
 struct LSystemInternodePhenotypeRecord {
@@ -157,7 +160,10 @@ struct LSystemDescriptorPhenotypeRecord {
   uint32_t triangle_count = 0;
   uint32_t leaf_triangle_count = 0;
   uint32_t stem_triangle_count = 0;
+  uint32_t panicle_branch_count = 0;
+  uint32_t panicle_spikelet_count = 0;
   float height_m = 0.0f;
+  float panicle_tip_height_m = 0.0f;
   float main_culm_tip_height_m = 0.0f;
   float main_culm_highest_mature_collar_height_m = 0.0f;
   float main_culm_tip_height_ratio = 0.0f;
@@ -170,6 +176,7 @@ struct LSystemDescriptorPhenotypeRecord {
   float leaf_area = 0.0f;
   float stem_area = 0.0f;
   bool has_geometry = false;
+  bool panicle_emerged = false;
   std::vector<LSystemAxisPhenotypeRecord> axes;
   std::vector<LSystemLeafPhenotypeRecord> leaves;
   std::vector<LSystemInternodePhenotypeRecord> internodes;
@@ -197,6 +204,15 @@ struct LSystemPlantSceneMetadataRecord {
   uint32_t leaf_triangle_count = 0;
   uint32_t culm_vertex_count = 0;
   uint32_t culm_triangle_count = 0;
+  uint32_t panicle_vertex_count = 0;
+  uint32_t panicle_triangle_count = 0;
+  uint32_t panicle_branch_count = 0;
+  uint32_t panicle_spikelet_count = 0;
+  uint32_t vegetative_organ_count = 0;
+  uint32_t immature_vegetative_organ_count = 0;
+  uint32_t panicle_organ_count = 0;
+  uint32_t immature_panicle_organ_count = 0;
+  uint32_t developmental_module_count = 0;
   double last_grow_seconds = 0.0;
   double last_rebuild_seconds = 0.0;
   double last_rebuild_internode_seconds = 0.0;
@@ -207,8 +223,23 @@ struct LSystemPlantSceneMetadataRecord {
   float leaf_thickness_m = 0.001f;
   float plant_height_m = 0.0f;
   float leaf_area_m2 = 0.0f;
+  float panicle_tip_height_m = 0.0f;
+  float vegetative_canopy_height_m = 0.0f;
+  float panicle_canopy_clearance_m = 0.0f;
+  float panicle_peduncle_length_m = 0.0f;
+  float panicle_rachis_length_m = 0.0f;
+  float panicle_branch_length_m = 0.0f;
   float middle_parbar_top_elevation_m = 0.0f;
+  float vegetative_maturity_gdd = 0.0f;
+  float panicle_initiation_gdd = 0.0f;
+  float panicle_maturity_gdd = 0.0f;
+  float minimum_vegetative_growth_progress = 0.0f;
+  float minimum_panicle_growth_progress = 0.0f;
   bool has_geometry = false;
+  bool panicle_emerged = false;
+  bool vegetative_organs_mature = false;
+  bool panicle_mature = false;
+  bool all_organs_mature = false;
   std::vector<LSystemAxisPhenotypeRecord> axes;
 };
 
@@ -284,7 +315,11 @@ class PyDigitalAgriculture {
                                         float ambient_light_intensity = 0.1f, float gamma = 2.2f);
 
   static bool CaptureCurrentSceneRayTraced(int resolution_x, int resolution_y, const std::filesystem::path& output_path,
-                                           int samples = 64, int bounces = 4, float gamma = 2.2f);
+                                           int samples = 64, int bounces = 4, float gamma = 2.2f,
+                                           float denoiser_strength = 0.0f);
+
+  static size_t ConfigurePresentationGroundExtension(bool enabled, float size_m = 160.0f, float texture_repeat_m = 2.0f,
+                                                     float grid_spacing_m = 1.0f);
 
   static std::array<uint64_t, 4> GetRayTracerBuildCounters();
 
@@ -294,17 +329,51 @@ class PyDigitalAgriculture {
 
   static size_t GrowSorghumLsPlantsToGdd(float evaluation_gdd, int seed_base = -1, bool update_render_geometry = true);
 
+  /// Advance a GDD-ordered sequence without replaying each plant from zero.
+  static size_t AdvanceSorghumLsPlantsToGdd(float evaluation_gdd, int seed_base = -1,
+                                            bool update_render_geometry = true);
+
   static size_t MaterializeSorghumLsPlantGeometry(bool update_render_geometry = false);
 
   static size_t SetSorghumLsLeafThickness(float leaf_thickness_m, bool regenerate_geometry = true);
 
   static size_t SetSorghumLsLeafWidthScale(float leaf_width_scale, bool regenerate_geometry = true);
 
+  static size_t ConfigureSorghumLsLeafMeshQuality(float vertical_subdivision_length, int horizontal_subdivision_step,
+                                                  bool bottom_face = true, bool enable_leaf_sheath = true,
+                                                  bool regenerate_geometry = false);
+
+  static size_t SetSorghumLsFinalizeSnapshotMorphology(bool enabled);
+
+  /// Clone each active descriptor and replace only reproductive presentation
+  /// fields. Vegetative distributions and growth curves remain unchanged.
+  static size_t ConfigureSorghumLsPaniclePresentation(float peduncle_length_m, float rachis_length_m,
+                                                      float branch_length_m, int primary_branch_count,
+                                                      int spikelet_pairs_per_branch, float spikelet_length_m,
+                                                      float spikelet_radius_m, float immature_red, float immature_green,
+                                                      float immature_blue, float mature_red, float mature_green,
+                                                      float mature_blue);
+
   static size_t SetSorghumLsCultivarDescriptors(const std::filesystem::path& btx_descriptor_path,
                                                 const std::filesystem::path& pawaga_descriptor_path,
                                                 bool regenerate_geometry = true, int seed_base = -1);
 
+  static size_t SetSorghumLsGenotypeDescriptors(const std::map<std::string, std::filesystem::path>& descriptor_paths,
+                                                bool regenerate_geometry = true, int seed_base = -1);
+
   static size_t SetSorghumLsGridSpacing(float spacing_x, float spacing_z, const std::string& cultivar_filter = "");
+
+  static size_t ConfigureSorghumLsPlantingGrid(const std::vector<std::string>& row_genotypes, uint32_t columns,
+                                               float column_spacing_m = 0.76f, float row_spacing_m = 1.10f,
+                                               float center_x_m = 2.58f, float center_z_m = -7.51f);
+
+  // Keeps the measured marker coordinates and PARBAR context, but changes the
+  // cultivar prefix used when the markers are converted to SorghumLS plants.
+  static size_t RelabelSorghumLsPlantingMarkersByRow(const std::vector<std::string>& row_genotypes);
+
+  static size_t ConfigureSorghumLsReplicatedSixByTenProfile(const std::vector<std::string>& block_genotypes);
+
+  static size_t RemoveParbarContext();
 
   static size_t ConformSorghumLsPlantsToGroundMesh();
 

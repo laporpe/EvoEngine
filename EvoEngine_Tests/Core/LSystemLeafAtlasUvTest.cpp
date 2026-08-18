@@ -748,3 +748,99 @@ TEST(LSystemSorghumTillers, DistichousOriginRanksReceiveCenteredSameSideSplay) {
   EXPECT_FLOAT_EQ(ComputeSorghumTillerSameSideSplay(five_tiller_ranks, 3, 12.0f), 0.0f);
   EXPECT_FLOAT_EQ(ComputeSorghumTillerSameSideSplay(five_tiller_ranks, 4, 12.0f), 12.0f);
 }
+
+TEST(LSystemSorghumPanicle, MainApexEmitsFlagLeafAndTripleSpikelets) {
+  SampledSorghumParams params;
+  params.total_phytomer_count = 3;
+  params.tiller_count = 0;
+  params.tiller_origin_ranks.clear();
+  params.plastochron_gdd = 1.0f;
+  params.maturity_gdd = 1.0f;
+  params.gdd_step = 1.0f;
+  params.flag_leaf_length_scale = 0.75f;
+  params.flag_leaf_width_scale = 0.80f;
+  params.flag_leaf_insertion_angle_offset = -10.0f;
+  params.flag_leaf_bending_scale = 0.50f;
+  params.enable_panicle = true;
+  params.panicle_initiation_gdd = 0.0f;
+  params.panicle_maturity_gdd = 1.0f;
+  params.panicle_primary_branch_count = 4;
+  params.panicle_spikelet_pairs_per_branch = 5;
+  ApplyMeanStdPlotDefaultsToAll(params.internode_length, params.internode_thickness, params.leaf_blade_length,
+                                params.leaf_blade_max_width, params.leaf_blade_thickness, params.leaf_sheath_thickness,
+                                params.leaf_sheath_length, params.leaf_neck_length, params.leaf_sheath_end_width_ratio,
+                                params.leaf_neck_end_width_ratio, params.leaf_blade_end_width_ratio,
+                                params.leaf_insertion_angle, params.leaf_roll_angle, params.leaf_curling,
+                                params.leaf_bending, params.leaf_waviness, params.tiller_leaf_area_ratio_by_origin);
+  SetConstantPlot(params.leaf_blade_length, 1.0f);
+  SetConstantPlot(params.leaf_blade_max_width, 0.10f);
+  SetConstantPlot(params.leaf_insertion_angle, 60.0f);
+  SetConstantPlot(params.leaf_bending, 40.0f);
+
+  SorghumGraph graph(1);
+  graph.RefNode(0).symbol_id = SorghumSymbol::Root;
+  graph.RefNode(0).data.Set<SorghumRoot>(SorghumRoot{});
+  const auto apex_handle = graph.Extend(0, false);
+  SorghumApex apex;
+  apex.vigor = params.total_phytomer_count;
+  apex.sampled_plastochron_gdd = 1.0f;
+  apex.age_gdd = 1.0f;
+  apex.axis_phytomer_count = params.total_phytomer_count;
+  graph.RefNode(apex_handle).symbol_id = SorghumSymbol::Apex;
+  graph.RefNode(apex_handle).data.Set<SorghumApex>(apex);
+  graph.SortLists();
+
+  SorghumEngine engine;
+  engine.topology_rules = CreateSorghumTopologyRules(params);
+  engine.growth_rules = CreateSorghumGrowthRules(params);
+  std::mt19937 rng(17u);
+  for (int step = 0; step < 16; ++step) {
+    engine.ApplyGrowthRules(graph, rng);
+    engine.ApplyTopologyRules(graph, rng);
+    graph.SortLists();
+  }
+
+  int flag_leaf_count = 0;
+  int rachis_count = 0;
+  int branch_count = 0;
+  int spikelet_count = 0;
+  int pedicellate_count = 0;
+  for (const auto handle : graph.PeekSortedNodeList()) {
+    const auto& node = graph.PeekNode(handle);
+    if (node.data.Is<SorghumLeaf>()) {
+      const auto& leaf = node.data.Get<SorghumLeaf>();
+      EXPECT_FLOAT_EQ(leaf.growth_progress, 1.0f);
+      EXPECT_FLOAT_EQ(leaf.blade_length, leaf.target_blade_length);
+      if (!leaf.is_flag_leaf)
+        continue;
+      ++flag_leaf_count;
+      EXPECT_EQ(leaf.rank, 2);
+      EXPECT_FLOAT_EQ(leaf.target_blade_length, 0.75f);
+      EXPECT_FLOAT_EQ(leaf.target_blade_max_width, 0.08f);
+      EXPECT_FLOAT_EQ(leaf.target_insertion_angle_deg, 50.0f);
+      EXPECT_FLOAT_EQ(leaf.target_bending, 20.0f);
+    } else if (node.data.Is<SorghumPanicleRachis>()) {
+      ++rachis_count;
+    } else if (node.data.Is<SorghumPanicleBranch>()) {
+      ++branch_count;
+      EXPECT_TRUE(node.data.Get<SorghumPanicleBranch>().spikelets_emitted);
+      ASSERT_GE(node.GetParentHandle(), 0);
+      EXPECT_TRUE(graph.PeekNode(node.GetParentHandle()).data.Is<SorghumPanicleRachis>());
+    } else if (node.data.Is<SorghumPanicleSpikelet>()) {
+      ++spikelet_count;
+      pedicellate_count += node.data.Get<SorghumPanicleSpikelet>().pedicellate ? 1 : 0;
+      ASSERT_GE(node.GetParentHandle(), 0);
+      EXPECT_TRUE(graph.PeekNode(node.GetParentHandle()).data.Is<SorghumPanicleBranch>());
+    } else if (node.data.Is<SorghumInternode>()) {
+      const auto& internode = node.data.Get<SorghumInternode>();
+      EXPECT_FLOAT_EQ(internode.growth_progress, 1.0f);
+      EXPECT_FLOAT_EQ(internode.length, internode.target_length);
+    }
+  }
+
+  EXPECT_EQ(flag_leaf_count, 1);
+  EXPECT_EQ(rachis_count, 1);
+  EXPECT_EQ(branch_count, params.panicle_primary_branch_count);
+  EXPECT_EQ(spikelet_count, params.panicle_primary_branch_count * params.panicle_spikelet_pairs_per_branch * 3);
+  EXPECT_EQ(pedicellate_count, spikelet_count * 2 / 3);
+}

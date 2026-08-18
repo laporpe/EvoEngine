@@ -10,7 +10,7 @@
 namespace l_system_package {
 
 // ---------------------------------------------------------------------------
-// Sorghum bicolor module set (vegetative culm only; panicle reserved).
+// Sorghum bicolor module set.
 //
 // Topology:
 //   - The SorghumApex (immortal until vigor is exhausted) emits ONE phytomer
@@ -21,9 +21,8 @@ namespace l_system_package {
 //   - Main-culm phytomers create primary tiller buds in their own leaf axils.
 //     A bud activates when the configured number of main-culm leaves has
 //     fully expanded, becoming an order-1 apex at the correct basal node.
-//   - When the main apex's vigor reaches zero it terminates with a
-//     SorghumPanicleBud placeholder so a future panicle grammar can plug
-//     in without symbol-id churn.
+//   - The final main-culm phytomer is the flag leaf. The exhausted main apex
+//     differentiates into a rachis, primary branches, and spikelet pairs.
 //
 // Symbols:
 //   0 SorghumApex       — culm meristem; emits phytomers and terminates.
@@ -163,6 +162,7 @@ struct SorghumLeaf {
   float senescence_phase = 0.0f;  ///< 0 = green, 1 = fully wilted.
   float damage_severity = 0.0f;   ///< Maximum deterministic edge weathering at maturity.
   bool alive = true;              ///< False = abscised; mesher skips.
+  bool is_flag_leaf = false;
 };
 
 struct SorghumTillerBud {
@@ -184,14 +184,60 @@ struct SorghumTillerBud {
 
 struct SorghumPanicleBud {
   float node_random = 0.5f;
+  float age_gdd = 0.0f;
+  float initiation_gdd = 0.0f;
+};
+
+struct SorghumPanicleRachis {
+  float length = 0.0f;
+  float thickness = 0.0f;
+  float target_length = 0.0f;
+  float target_thickness = 0.0f;
+  float age_gdd = 0.0f;
+  float growth_progress = 0.0f;
+  float node_random = 0.5f;
+};
+
+struct SorghumPanicleBranch {
+  float length = 0.0f;
+  float thickness = 0.0f;
+  float target_length = 0.0f;
+  float target_thickness = 0.0f;
+  float attachment_fraction = 1.0f;
+  float branch_angle = 0.0f;
+  float roll_angle = 0.0f;
+  float age_gdd = 0.0f;
+  float growth_progress = 0.0f;
+  int rank = 0;
+  int spikelet_pair_count = 0;
+  bool spikelets_emitted = false;
+  float node_random = 0.5f;
+};
+
+struct SorghumPanicleSpikelet {
+  float pedicel_length = 0.0f;
+  float spikelet_length = 0.0f;
+  float target_pedicel_length = 0.0f;
+  float target_spikelet_length = 0.0f;
+  float radius = 0.0f;
+  float target_radius = 0.0f;
+  float attachment_fraction = 1.0f;
+  float branch_angle = 0.0f;
+  float roll_angle = 0.0f;
+  float age_gdd = 0.0f;
+  float growth_progress = 0.0f;
+  int branch_rank = 0;
+  bool pedicellate = false;
+  float node_random = 0.5f;
 };
 
 // ---------------------------------------------------------------------------
 // Type aliases
 // ---------------------------------------------------------------------------
 
-using SorghumModuleData =
-    ModuleVariant<SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud, SorghumPanicleBud, SorghumRoot>;
+using SorghumModuleData = ModuleVariant<SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
+                                        SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis,
+                                        SorghumPanicleBranch, SorghumPanicleSpikelet>;
 
 struct SorghumSymbol {
   static constexpr int Apex = ModuleIndex<SorghumApex, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
@@ -206,6 +252,16 @@ struct SorghumSymbol {
                                                 SorghumTillerBud, SorghumPanicleBud, SorghumRoot>::value;  // 4
   static constexpr int Root = ModuleIndex<SorghumRoot, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
                                           SorghumPanicleBud, SorghumRoot>::value;  // 5
+  static constexpr int PanicleRachis =
+      ModuleIndex<SorghumPanicleRachis, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
+                  SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis>::value;  // 6
+  static constexpr int PanicleBranch =
+      ModuleIndex<SorghumPanicleBranch, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
+                  SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis, SorghumPanicleBranch>::value;  // 7
+  static constexpr int PanicleSpikelet =
+      ModuleIndex<SorghumPanicleSpikelet, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
+                  SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis, SorghumPanicleBranch,
+                  SorghumPanicleSpikelet>::value;  // 8
 };
 
 // ---------------------------------------------------------------------------

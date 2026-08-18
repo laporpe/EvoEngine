@@ -80,6 +80,30 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   // ===== Leaf lifecycle (chronological, mirrors ScotsPine) =====
   evo_engine::SingleDistribution<float> leaf_lifespan_years{2.5f};
   evo_engine::SingleDistribution<float> leaf_wilting_years{0.5f};
+  evo_engine::SingleDistribution<float> flag_leaf_length_scale{0.78f};
+  evo_engine::SingleDistribution<float> flag_leaf_width_scale{0.82f};
+  evo_engine::SingleDistribution<float> flag_leaf_insertion_angle_offset{-12.0f};
+  evo_engine::SingleDistribution<float> flag_leaf_bending_scale{0.65f};
+
+  // ===== Reproductive panicle =====
+  bool enable_panicle = true;
+  evo_engine::SingleDistribution<float> panicle_initiation_gdd{1.0f};
+  evo_engine::SingleDistribution<float> panicle_maturity_gdd{260.0f};
+  /// Unbranched exserted segment between the flag-leaf sheath and the rachis.
+  evo_engine::SingleDistribution<float> panicle_peduncle_length_m{0.24f, 0.03f};
+  evo_engine::SingleDistribution<float> panicle_rachis_length_m{0.30f, 0.04f};
+  evo_engine::SingleDistribution<float> panicle_rachis_radius_m{0.006f, 0.001f};
+  evo_engine::SingleDistribution<float> panicle_primary_branch_count{18.0f, 2.0f};
+  // Number of sessile-plus-two-pedicellate spikelet triads along each primary branch.
+  // The legacy field name remains for descriptor compatibility.
+  evo_engine::SingleDistribution<float> panicle_spikelet_pairs_per_branch{6.0f, 1.0f};
+  evo_engine::SingleDistribution<float> panicle_branch_length_m{0.13f, 0.02f};
+  evo_engine::SingleDistribution<float> panicle_branch_length_taper{0.42f};
+  evo_engine::SingleDistribution<float> panicle_branch_radius_m{0.0022f, 0.0003f};
+  evo_engine::SingleDistribution<float> panicle_branch_angle_degrees{32.0f, 5.0f};
+  evo_engine::SingleDistribution<float> panicle_spikelet_length_m{0.008f, 0.001f};
+  evo_engine::SingleDistribution<float> panicle_spikelet_radius_m{0.0036f, 0.0005f};
+  evo_engine::SingleDistribution<float> panicle_pedicel_length_m{0.006f, 0.001f};
 
   // ===== Tillering =====
   uint32_t tiller_model_version = 4u;
@@ -168,6 +192,9 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   float stem_material_roughness = 0.74f;
   float stem_material_metallic = 0.0f;
   float stem_material_specular = 0.4f;
+  glm::vec3 panicle_immature_color{0.32f, 0.56f, 0.16f};
+  glm::vec3 panicle_mature_color{0.48f, 0.16f, 0.07f};
+  float panicle_material_roughness = 0.78f;
   uint32_t culm_radial_segments = 24u;
   float culm_node_radius_scale = 1.08f;
   float culm_texture_repeat_m = 0.25f;

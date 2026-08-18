@@ -9,6 +9,7 @@ tasks/
 docs/*
 !docs/
 !docs/*.md
+!docs/*.json
 
 #3rdParty
 3rdParty
@@ -77,6 +78,10 @@ out/
 # Generated files
 .idea/**/contentModel.xml
 /ShaderBinaries/
+
+# Local research source library; provenance catalogs and synthesis notes are versioned.
+/research/panicle source/papers/
+/research/panicle source/photos/
 
 # Sensitive or high-churn files
 .idea/**/dataSources/
