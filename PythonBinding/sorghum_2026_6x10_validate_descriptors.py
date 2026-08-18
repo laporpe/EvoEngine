@@ -151,7 +151,7 @@ def validate(evo: object, args: argparse.Namespace) -> dict[str, object]:
         )
     return {
         "schema_version": 1,
-        "experiment_id": EXPERIMENT_ID,
+        "experiment_id": build_report.get("experiment_id", EXPERIMENT_ID),
         "sample_count_per_descriptor": args.sample_count,
         "descriptor_count": len(reports),
         "success": all(report["acceptance"]["success"] for report in reports),

@@ -36,8 +36,12 @@ class Sorghum2026ValidationTests(unittest.TestCase):
                 path = root / relative
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(relative, encoding="utf-8")
+            project = root / "test_lsystem_sorghum.eveproj"
+            project.write_text("start_scene_handle: 1", encoding="utf-8")
             baseline_path = root / "baseline.json"
             validation.write_baseline(root, baseline_path)
+            project.write_text("start_scene_handle: 2", encoding="utf-8")
+            self.assertEqual("exact_match", validation.validate_legacy(root, baseline_path)["status"])
             target = root / validation.LEGACY_PATHS[0]
             target.write_text("changed", encoding="utf-8")
             with self.assertRaises(AssertionError):

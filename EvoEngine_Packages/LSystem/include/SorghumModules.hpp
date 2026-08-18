@@ -235,9 +235,9 @@ struct SorghumPanicleSpikelet {
 // Type aliases
 // ---------------------------------------------------------------------------
 
-using SorghumModuleData = ModuleVariant<SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
-                                        SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis,
-                                        SorghumPanicleBranch, SorghumPanicleSpikelet>;
+using SorghumModuleData =
+    ModuleVariant<SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud, SorghumPanicleBud, SorghumRoot,
+                  SorghumPanicleRachis, SorghumPanicleBranch, SorghumPanicleSpikelet>;
 
 struct SorghumSymbol {
   static constexpr int Apex = ModuleIndex<SorghumApex, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
@@ -253,11 +253,11 @@ struct SorghumSymbol {
   static constexpr int Root = ModuleIndex<SorghumRoot, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
                                           SorghumPanicleBud, SorghumRoot>::value;  // 5
   static constexpr int PanicleRachis =
-      ModuleIndex<SorghumPanicleRachis, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
-                  SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis>::value;  // 6
+      ModuleIndex<SorghumPanicleRachis, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud, SorghumPanicleBud,
+                  SorghumRoot, SorghumPanicleRachis>::value;  // 6
   static constexpr int PanicleBranch =
-      ModuleIndex<SorghumPanicleBranch, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
-                  SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis, SorghumPanicleBranch>::value;  // 7
+      ModuleIndex<SorghumPanicleBranch, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud, SorghumPanicleBud,
+                  SorghumRoot, SorghumPanicleRachis, SorghumPanicleBranch>::value;  // 7
   static constexpr int PanicleSpikelet =
       ModuleIndex<SorghumPanicleSpikelet, SorghumApex, SorghumInternode, SorghumLeaf, SorghumTillerBud,
                   SorghumPanicleBud, SorghumRoot, SorghumPanicleRachis, SorghumPanicleBranch,

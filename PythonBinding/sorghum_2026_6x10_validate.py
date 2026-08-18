@@ -14,7 +14,6 @@ from sorghum_2026_6x10_data import EXPERIMENT_ID, ROW_GENOTYPES, repo_root_from_
 
 
 LEGACY_PATHS = (
-    "test_lsystem_sorghum.eveproj",
     "Assets/ManualAssets/Scenes/Sorghum_4x10_PARBAR.evescene",
     "Assets/GeneratedAssets/Reports/field_manifest.csv",
     "Assets/GeneratedAssets/Reports/calibration_summary.csv",

@@ -58,7 +58,7 @@ class SorghumLS final : public LSystemComponentBase<SorghumLS> {
   /// Advance an already-initialized plant to target_gdd without replaying its
   /// prior thermal history.  Reinitializes safely when target_gdd is rewound.
   [[nodiscard]] std::shared_ptr<const SorghumGeometrySnapshot> AdvanceGeometrySnapshot(bool uncapped_growth = false,
-                                                                                        uint32_t max_growth_steps = 0);
+                                                                                       uint32_t max_growth_steps = 0);
   void GeneratePreviewGeometryEntities(float preview_target_gdd, uint32_t preview_max_growth_steps);
   void GrowToTargetGDD(bool uncapped_growth = false, uint32_t max_growth_steps = 0);
   void SetSeasonalChronologicalMode(bool enable_independent_chronological_clock);

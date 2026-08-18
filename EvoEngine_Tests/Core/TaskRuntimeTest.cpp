@@ -80,7 +80,8 @@ TEST(TaskRuntime, ReleasesCallableCapturesWhenTaskCompletesWithoutWait) {
 
   auto payload = std::make_shared<int>(42);
   const std::weak_ptr<int> weak_payload = payload;
-  const auto task = runtime.Schedule([payload]() {});
+  const auto task = runtime.Schedule([payload]() {
+  });
   runtime.Execute(task);
   payload.reset();
 

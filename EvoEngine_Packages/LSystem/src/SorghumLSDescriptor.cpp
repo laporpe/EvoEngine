@@ -504,10 +504,10 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.panicle_peduncle_length_m = std::max(0.0f, SampleDistribution(panicle_peduncle_length_m, rng));
   p.panicle_rachis_length_m = std::max(0.02f, SampleDistribution(panicle_rachis_length_m, rng));
   p.panicle_rachis_radius_m = std::max(0.0005f, SampleDistribution(panicle_rachis_radius_m, rng));
-  p.panicle_primary_branch_count = std::clamp(
-      static_cast<int>(std::round(SampleDistribution(panicle_primary_branch_count, rng))), 1, 64);
-  p.panicle_spikelet_pairs_per_branch = std::clamp(
-      static_cast<int>(std::round(SampleDistribution(panicle_spikelet_pairs_per_branch, rng))), 1, 32);
+  p.panicle_primary_branch_count =
+      std::clamp(static_cast<int>(std::round(SampleDistribution(panicle_primary_branch_count, rng))), 1, 64);
+  p.panicle_spikelet_pairs_per_branch =
+      std::clamp(static_cast<int>(std::round(SampleDistribution(panicle_spikelet_pairs_per_branch, rng))), 1, 32);
   p.panicle_branch_length_m = std::max(0.005f, SampleDistribution(panicle_branch_length_m, rng));
   p.panicle_branch_length_taper = std::clamp(SampleDistribution(panicle_branch_length_taper, rng), 0.05f, 1.0f);
   p.panicle_branch_radius_m = std::max(0.0001f, SampleDistribution(panicle_branch_radius_m, rng));

@@ -10,7 +10,14 @@
 namespace l_system_package {
 using namespace evo_engine;
 
-enum class SorghumOrganGeometryKind : uint8_t { Culm, InternodeInstance, Leaf, PanicleRachis, PanicleBranch, PanicleSpikelet };
+enum class SorghumOrganGeometryKind : uint8_t {
+  Culm,
+  InternodeInstance,
+  Leaf,
+  PanicleRachis,
+  PanicleBranch,
+  PanicleSpikelet
+};
 
 struct SorghumOrganGeometryRange {
   SorghumOrganGeometryKind kind = SorghumOrganGeometryKind::Leaf;

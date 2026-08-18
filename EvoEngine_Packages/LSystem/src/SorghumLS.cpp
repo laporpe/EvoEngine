@@ -553,7 +553,7 @@ std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::GenerateGeometrySnapsh
 }
 
 std::shared_ptr<const SorghumGeometrySnapshot> SorghumLS::AdvanceGeometrySnapshot(const bool uncapped_growth,
-                                                                                   const uint32_t max_growth_steps) {
+                                                                                  const uint32_t max_growth_steps) {
   const double grow_start = GetApplication().GetTimes().Now();
   const auto descriptor = descriptor_ref.Get<SorghumLSDescriptor>();
   if (!descriptor) {

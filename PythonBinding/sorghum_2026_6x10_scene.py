@@ -47,6 +47,12 @@ MANIFEST_COLUMNS = (
     "plant_height_m",
     "main_culm_leaf_count",
     "primary_tiller_count",
+    "panicle_emerged",
+    "panicle_rachis_length_m",
+    "panicle_branch_length_m",
+    "vegetative_organs_mature",
+    "panicle_mature",
+    "all_organs_mature",
     "parbar_context_present",
     "illumination_estimation_performed",
 )
@@ -79,11 +85,15 @@ def read_csv(path: Path) -> list[dict[str, str]]:
         return list(csv.DictReader(stream))
 
 
-def descriptor_maps(build_report: dict[str, object]) -> dict[str, dict[str, Path]]:
+def descriptor_maps(
+    build_report: dict[str, object],
+    sessions: tuple[str, ...] = SESSIONS,
+    genotypes: tuple[str, ...] = GENOTYPES,
+) -> dict[str, dict[str, Path]]:
     result: dict[str, dict[str, Path]] = defaultdict(dict)
     for row in build_report["descriptors"]:  # type: ignore[index]
         result[str(row["session_id"])][str(row["genotype_id"])] = Path(str(row["descriptor_asset_path"]))
-    expected = {(session, genotype) for session in SESSIONS for genotype in GENOTYPES}
+    expected = {(session, genotype) for session in sessions for genotype in genotypes}
     actual = {(session, genotype) for session, rows in result.items() for genotype in rows}
     if actual != expected:
         raise ValueError(f"descriptor report coverage mismatch: missing={sorted(expected - actual)}")
@@ -253,6 +263,12 @@ def record_rows(
                 "plant_height_m": float(record.plant_height_m),
                 "main_culm_leaf_count": int(record.main_culm_leaf_count),
                 "primary_tiller_count": int(record.primary_tiller_count),
+                "panicle_emerged": bool(record.panicle_emerged),
+                "panicle_rachis_length_m": float(record.panicle_rachis_length_m),
+                "panicle_branch_length_m": float(record.panicle_branch_length_m),
+                "vegetative_organs_mature": bool(record.vegetative_organs_mature),
+                "panicle_mature": bool(record.panicle_mature),
+                "all_organs_mature": bool(record.all_organs_mature),
                 "parbar_context_present": True,
                 "illumination_estimation_performed": False,
             }
@@ -267,8 +283,10 @@ def generate_session(
     descriptors: dict[str, Path],
     dates: dict[str, dict[str, tuple[str, ...]]],
     reset_to_markers: bool,
+    scene_root: Path = GENERATED_SCENE_ROOT,
+    seed: int | None = None,
 ) -> tuple[Path, list[dict[str, object]]]:
-    target = GENERATED_SCENE_ROOT / f"Sorghum_6x10_{session}.evescene"
+    target = scene_root / f"Sorghum_6x10_{session}.evescene"
     staged = staging_scene_target(target)
     template_path = args.project_root / "Assets" / TEMPLATE_SCENE
     template_hash = sha256(template_path)
@@ -279,7 +297,7 @@ def generate_session(
             raise RuntimeError(f"{session}: failed to conform 60 roots to the measured soil surface")
         if int(evo.SetSorghumLsGenotypeDescriptors(descriptors, False, -1)) != 60:
             raise RuntimeError(f"{session}: failed to assign all three descriptor assets")
-        if int(evo.GrowSorghumLsPlantsToAdulthood(SEEDS[session])) != 60:
+        if int(evo.GrowSorghumLsPlantsToAdulthood(SEEDS[session] if seed is None else seed)) != 60:
             raise RuntimeError(f"{session}: failed to grow 60 plants")
         if not evo.WaitForProjectIdle(args.max_wait_frames):
             raise RuntimeError(f"{session}: geometry did not become idle")
@@ -300,7 +318,12 @@ def generate_session(
     return target, record_rows(session, target, records, dates)
 
 
-def write_manifest(data_root: Path, template: dict[str, object], rows: list[dict[str, object]]) -> None:
+def write_manifest(
+    data_root: Path,
+    template: dict[str, object],
+    rows: list[dict[str, object]],
+    experiment_id: str = EXPERIMENT_ID,
+) -> None:
     data_root.mkdir(parents=True, exist_ok=True)
     csv_path = data_root / "scene_manifest.csv"
     with csv_path.open("w", newline="", encoding="utf-8") as stream:
@@ -309,7 +332,7 @@ def write_manifest(data_root: Path, template: dict[str, object], rows: list[dict
         writer.writerows(rows)
     summary = {
         "schema_version": 1,
-        "experiment_id": EXPERIMENT_ID,
+        "experiment_id": experiment_id,
         "purpose": "rendering_morphology_and_replicated_instrument_context",
         "template": template,
         "scene_count": len({row["session_id"] for row in rows}),
