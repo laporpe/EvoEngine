@@ -119,6 +119,16 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   float tiller_recovery_axis_fraction = 1.0f;
   evo_engine::SingleDistribution<float> tiller_leaf_count_ratio{0.90f, 0.03f};
   evo_engine::SingleDistribution<float> tiller_height_ratio{0.90f, 0.03f};
+  /// When true, tiller height is emergent rather than prescribed: the tiller
+  /// takes the main culm's internode profile by ABSOLUTE rank and its height is
+  /// simply the sum of those internodes. `tiller_height_ratio` is then unused,
+  /// and leaf count is drawn from `tiller_leaf_count_ratio_quantiles` instead of
+  /// the narrow `tiller_leaf_count_ratio`, so short late tillers are short
+  /// because they carry few internodes.
+  bool tiller_emergent_height = false;
+  /// Inverse CDF of tiller leaf count as a fraction of the main culm's, keyed on
+  /// a uniform draw in [0,1]. Only consulted when `tiller_emergent_height`.
+  evo_engine::PlottedDistribution<float> tiller_leaf_count_ratio_quantiles;
   evo_engine::PlottedDistribution<float> tiller_leaf_area_ratio_by_origin;
   evo_engine::SingleDistribution<float> tiller_thickness_ratio{0.80f, 0.05f};
   /// Lateral distance from the culm axis at which a tiller emerges (m).

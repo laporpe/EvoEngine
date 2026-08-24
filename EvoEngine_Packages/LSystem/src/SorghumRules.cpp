@@ -250,10 +250,23 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         bud.axis_id = tiller_selection_index + 1;
         bud.origin_rank = origin_rank;
         bud.reference_main_phytomer_count = total_nodes;
-        bud.target_leaf_count_ratio =
-            std::clamp(SampleDistribution(params.tiller_leaf_count_ratio, node_rng), 0.75f, 1.05f);
-        bud.target_height_ratio = std::clamp(SampleDistribution(params.tiller_height_ratio, node_rng), 0.75f, 1.05f);
-        bud.lateral_phytomer_count = ComputeSorghumTillerLeafBudget(total_nodes, bud.target_leaf_count_ratio);
+        if (params.tiller_emergent_height) {
+          // Draw the tiller's leaf count straight from the measured distribution
+          // (inverse CDF on a uniform draw) and let its height fall out of the
+          // internodes it carries, rather than prescribing a height ratio.
+          const float quantile = SampleUnit01(node_rng);
+          bud.target_leaf_count_ratio =
+              std::max(0.0f, SamplePlotted(params.tiller_leaf_count_ratio_quantiles, quantile, node_rng));
+          bud.target_height_ratio = 1.0f;
+          bud.lateral_phytomer_count =
+              std::clamp(static_cast<int>(std::round(static_cast<float>(total_nodes) * bud.target_leaf_count_ratio)),
+                         1, std::max(1, static_cast<int>(std::ceil(1.25f * static_cast<float>(total_nodes)))));
+        } else {
+          bud.target_leaf_count_ratio =
+              std::clamp(SampleDistribution(params.tiller_leaf_count_ratio, node_rng), 0.75f, 1.05f);
+          bud.target_height_ratio = std::clamp(SampleDistribution(params.tiller_height_ratio, node_rng), 0.75f, 1.05f);
+          bud.lateral_phytomer_count = ComputeSorghumTillerLeafBudget(total_nodes, bud.target_leaf_count_ratio);
+        }
         bud.activation_main_leaf_stage =
             params.tiller_emergence_main_leaf_stages[static_cast<size_t>(std::clamp(origin_rank - 1, 0, 5))];
         bud.insertion_angle = std::max(0.0f, SampleDistribution(params.tiller_insertion_angle, node_rng));
@@ -270,9 +283,14 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         bud.lateral_thickness_ratio =
             std::clamp(SampleDistribution(params.tiller_thickness_ratio, node_rng), 0.05f, 1.2f);
         bud.base_radial_offset = std::max(0.0f, SampleDistribution(params.tiller_base_radial_offset, node_rng));
-        bud.axis_length_scale = ComputeTillerAxisLengthScale(params, ctx.graph.data.main_internode_target_lengths,
-                                                             bud.lateral_phytomer_count, bud.insertion_angle,
-                                                             bud.final_lean_angle, bud.target_height_ratio);
+        // Emergent height: no rescaling at all, so the axis length is exactly the
+        // sum of the internodes the tiller carries.
+        bud.axis_length_scale =
+            params.tiller_emergent_height
+                ? 1.0f
+                : ComputeTillerAxisLengthScale(params, ctx.graph.data.main_internode_target_lengths,
+                                               bud.lateral_phytomer_count, bud.insertion_angle,
+                                               bud.final_lean_angle, bud.target_height_ratio);
         bud.node_random = SampleUnit01(node_rng);
         s.data.Set<SorghumTillerBud>(bud);
         s.symbol_id = SorghumSymbol::TillerBud;
@@ -452,6 +470,12 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
 
       const int rank = std::max(0, apex.phytomer_count);
       const float t_pos = AxisRankPosition(apex, rank);
+      // With emergent height a tiller reads the culm profile by ABSOLUTE rank, so a
+      // short tiller takes the first few (short, thick) basal internodes instead of
+      // stretching the whole culm profile across however many nodes it has.
+      const float profile_pos = params.tiller_emergent_height
+                                    ? RankToUnitPosition(rank, std::max(1, params.total_phytomer_count))
+                                    : t_pos;
 
       ProductionResult<SorghumModuleData> result;
 
@@ -462,11 +486,12 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         SorghumInternode internode;
         internode.target_length =
             std::max(0.001f, (ctx.graph.data.main_internode_target_lengths.empty()
-                                  ? SamplePlotted(params.internode_length, t_pos, node_rng)
-                                  : SampleMainInternodeProfile(ctx.graph.data.main_internode_target_lengths, t_pos)) *
+                                  ? SamplePlotted(params.internode_length, profile_pos, node_rng)
+                                  : SampleMainInternodeProfile(ctx.graph.data.main_internode_target_lengths,
+                                                               profile_pos)) *
                                  apex.axis_length_scale);
-        internode.target_thickness =
-            std::max(0.0005f, SamplePlotted(params.internode_thickness, t_pos, node_rng) * apex.thickness_ratio);
+        internode.target_thickness = std::max(
+            0.0005f, SamplePlotted(params.internode_thickness, profile_pos, node_rng) * apex.thickness_ratio);
         internode.length = 0.0f;
         internode.thickness = 0.0f;
         const bool first_lateral_internode = rank == 0;

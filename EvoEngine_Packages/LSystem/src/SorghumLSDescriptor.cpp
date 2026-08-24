@@ -530,6 +530,8 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.tiller_base_radial_offset = tiller_base_radial_offset;
   p.tiller_leaf_count_ratio = tiller_leaf_count_ratio;
   p.tiller_height_ratio = tiller_height_ratio;
+  p.tiller_emergent_height = tiller_emergent_height;
+  p.tiller_leaf_count_ratio_quantiles = tiller_leaf_count_ratio_quantiles;
   p.tiller_leaf_area_ratio_by_origin = tiller_leaf_area_ratio_by_origin;
   p.tiller_thickness_ratio = tiller_thickness_ratio;
   p.tiller_max_axis_length_ratio = std::clamp(SampleDistribution(tiller_max_axis_length_ratio, rng), 0.1f, 1.5f);
@@ -949,6 +951,9 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= tiller_base_radial_offset.Draw("Tiller Base Radial Offset (m)", 0.001f);
     changed |= tiller_leaf_count_ratio.Draw("Tiller/Main Leaf Count Ratio", 0.01f);
     changed |= tiller_height_ratio.Draw("Tiller/Main Culm-Tip Height Ratio", 0.01f);
+    changed |= ImGui::Checkbox("Emergent Tiller Height", &tiller_emergent_height);
+    changed |= inspect_plotted_distribution("Tiller Leaf Count Ratio Quantiles",
+                                            tiller_leaf_count_ratio_quantiles);
     changed |= inspect_plotted_distribution("Tiller Leaf Area Ratio by Origin", tiller_leaf_area_ratio_by_origin);
     changed |= tiller_thickness_ratio.Draw("Tiller Thickness Ratio", 0.01f);
     changed |= tiller_max_axis_length_ratio.Draw("Maximum Tiller/Main Axis Length", 0.01f);
@@ -1256,6 +1261,8 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.tiller_base_radial_offset.Save("tiller_base_radial_offset", out);
   target.tiller_leaf_count_ratio.Save("tiller_leaf_count_ratio", out);
   target.tiller_height_ratio.Save("tiller_height_ratio", out);
+  out << YAML::Key << "tiller_emergent_height" << YAML::Value << target.tiller_emergent_height;
+  target.tiller_leaf_count_ratio_quantiles.Save("tiller_leaf_count_ratio_quantiles", out);
   target.tiller_leaf_area_ratio_by_origin.Save("tiller_leaf_area_ratio_by_origin", out);
   target.tiller_thickness_ratio.Save("tiller_thickness_ratio", out);
   target.tiller_max_axis_length_ratio.Save("tiller_max_axis_length_ratio", out);
@@ -1432,6 +1439,8 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& tiller_base_radial_offset = target.tiller_base_radial_offset;
   auto& tiller_leaf_count_ratio = target.tiller_leaf_count_ratio;
   auto& tiller_height_ratio = target.tiller_height_ratio;
+  auto& tiller_emergent_height = target.tiller_emergent_height;
+  auto& tiller_leaf_count_ratio_quantiles = target.tiller_leaf_count_ratio_quantiles;
   auto& tiller_leaf_area_ratio_by_origin = target.tiller_leaf_area_ratio_by_origin;
   auto& tiller_phytomer_count_scale = target.tiller_phytomer_count_scale;
   auto& tiller_thickness_ratio = target.tiller_thickness_ratio;
@@ -1621,6 +1630,10 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   LoadSingleDistributionWithScalarFallback(in, "tiller_base_radial_offset", tiller_base_radial_offset);
   LoadSingleDistributionWithScalarFallback(in, "tiller_leaf_count_ratio", tiller_leaf_count_ratio);
   LoadSingleDistributionWithScalarFallback(in, "tiller_height_ratio", tiller_height_ratio);
+  if (in["tiller_emergent_height"]) {
+    tiller_emergent_height = in["tiller_emergent_height"].as<bool>();
+  }
+  tiller_leaf_count_ratio_quantiles.Load("tiller_leaf_count_ratio_quantiles", in);
   tiller_leaf_area_ratio_by_origin.Load("tiller_leaf_area_ratio_by_origin", in);
   LoadSingleDistributionWithScalarFallback(in, "tiller_phytomer_count_scale", tiller_phytomer_count_scale);
   LoadSingleDistributionWithScalarFallback(in, "tiller_thickness_ratio", tiller_thickness_ratio);
