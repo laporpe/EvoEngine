@@ -402,6 +402,22 @@ glm::vec3 SorghumGrowthModel::ComputeChildGlobalPositionImpl(const LGraphNode<So
     return glm::mix(parent.info.global_position, parent.info.GetGlobalEndPosition(),
                     std::clamp(node.data.Get<SorghumPanicleSpikelet>().attachment_fraction, 0.0f, 1.0f));
   }
+  if (node.data.Is<SorghumInternode>()) {
+    const auto& internode = node.data.Get<SorghumInternode>();
+    if (internode.base_radial_offset > 1.0e-6f) {
+      // A tiller emerges beside the culm, not from a point shared with it.
+      // Its basal internode rolls by `roll_angle` about the parent axis and
+      // then pitches toward local +Y, so +Y under that same roll is the
+      // horizontal direction the tiller departs along.
+      const glm::quat roll = glm::angleAxis(glm::radians(internode.roll_angle), glm::vec3(0, 0, -1));
+      const glm::vec3 lateral = parent.info.global_rotation * (roll * glm::vec3(0, 1, 0));
+      const float lateral_length = glm::length(lateral);
+      if (std::isfinite(lateral_length) && lateral_length > 1.0e-6f) {
+        return ComputeSorghumChildGlobalPosition(node, parent) +
+               (lateral / lateral_length) * internode.base_radial_offset;
+      }
+    }
+  }
   return ComputeSorghumChildGlobalPosition(node, parent);
 }
 

@@ -426,6 +426,39 @@ void ApplyLeafStaticDeformation(SorghumSpline& spline, const size_t blade_start_
   }
 }
 
+// Blades cannot pass through the soil. Once a drooping leaf reaches the
+// ground it lies along it -- which is what long lower leaves actually do in
+// the field -- so the centreline is clamped rather than the arch rescaled.
+// Everywhere the blade is still airborne the fitted curvature is untouched.
+void ClampBladeToGroundPlane(SorghumSpline& spline, const size_t blade_start_index, const float ground_y) {
+  if (blade_start_index >= spline.segments.size())
+    return;
+  // Small clearance so a resting blade does not z-fight the ground plane.
+  constexpr float kGroundClearance = 0.001f;
+  const float minimum_y = ground_y + kGroundClearance;
+  bool clamped_any = false;
+  for (size_t i = blade_start_index; i < spline.segments.size(); ++i) {
+    if (spline.segments[i].position.y < minimum_y) {
+      spline.segments[i].position.y = minimum_y;
+      clamped_any = true;
+    }
+  }
+  if (!clamped_any)
+    return;
+  // Re-derive tangents so the flattened run shades and twists correctly.
+  for (size_t i = blade_start_index; i < spline.segments.size(); ++i) {
+    const size_t previous = i == blade_start_index ? i : i - 1;
+    const size_t next = std::min(i + 1, spline.segments.size() - 1);
+    if (previous == next)
+      continue;
+    auto& segment = spline.segments[i];
+    segment.front = SafeNormalize(spline.segments[next].position - spline.segments[previous].position,
+                                  segment.front);
+    const glm::vec3 up = segment.up - glm::dot(segment.up, segment.front) * segment.front;
+    segment.up = SafeNormalize(up, segment.up);
+  }
+}
+
 glm::vec3 EvaluateLeafBaseTint(const SorghumLeaf& leaf) {
   const float rank = ComputeSorghumAxisRankPosition(leaf.rank, leaf.axis_phytomer_count);
   const glm::vec3 basal(0.78f, 0.90f, 0.72f);
@@ -979,6 +1012,9 @@ void l_system_package::BuildLeafSplineFromState(const SorghumLeaf& leaf, const S
   }
   ApplyLeafGravity(out_spline, blade_start_index, leaf, params, settings, leaf_left);
   ApplyLeafStaticDeformation(out_spline, blade_start_index, leaf, params);
+  if (settings.clamp_blade_to_ground) {
+    ClampBladeToGroundPlane(out_spline, blade_start_index, settings.ground_plane_y);
+  }
 }
 
 void l_system_package::GenerateBladeGeometry(const SorghumSpline& spline, const SorghumLeaf& leaf,

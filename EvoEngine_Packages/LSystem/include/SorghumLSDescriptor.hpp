@@ -121,6 +121,10 @@ class SorghumLSDescriptor : public evo_engine::IAsset, public ILSystemExplorable
   evo_engine::SingleDistribution<float> tiller_height_ratio{0.90f, 0.03f};
   evo_engine::PlottedDistribution<float> tiller_leaf_area_ratio_by_origin;
   evo_engine::SingleDistribution<float> tiller_thickness_ratio{0.80f, 0.05f};
+  /// Lateral distance from the culm axis at which a tiller emerges (m).
+  /// Physically ~ (stem radius + tiller radius). 0 reproduces the legacy
+  /// behaviour of every tiller sharing the main culm's base point.
+  evo_engine::SingleDistribution<float> tiller_base_radial_offset{0.0f, 0.0f};
   evo_engine::SingleDistribution<float> tiller_max_axis_length_ratio{1.10f};
 
   // Legacy v1 controls are load-only migration inputs. They are intentionally

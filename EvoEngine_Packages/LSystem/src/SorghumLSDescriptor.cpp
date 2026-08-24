@@ -331,6 +331,7 @@ void ClampDescriptorValues(SorghumLSDescriptor& descriptor) {
   ClampSingleDistribution(descriptor.tiller_azimuth_jitter, -45.0f, 45.0f, 45.0f);
   ClampSingleDistribution(descriptor.tiller_same_side_splay_angle, 0.0f, 45.0f, 20.0f);
   descriptor.tiller_recovery_axis_fraction = std::clamp(descriptor.tiller_recovery_axis_fraction, 0.05f, 1.0f);
+  ClampSingleDistribution(descriptor.tiller_base_radial_offset, 0.0f, 0.25f, 0.05f);
   ClampSingleDistribution(descriptor.tiller_leaf_count_ratio, 0.5f, 1.1f, 0.3f);
   ClampSingleDistribution(descriptor.tiller_height_ratio, 0.5f, 1.1f, 0.3f);
   ClampPlottedDistributionRange(descriptor.tiller_leaf_area_ratio_by_origin, 0.1f, 1.2f, 0.5f);
@@ -526,6 +527,7 @@ SampledSorghumParams SorghumLSDescriptor::Sample(std::mt19937& rng) const {
   p.tiller_azimuth_jitter = tiller_azimuth_jitter;
   p.tiller_same_side_splay_angle = std::clamp(SampleDistribution(tiller_same_side_splay_angle, rng), 0.0f, 45.0f);
   p.tiller_recovery_axis_fraction = tiller_recovery_axis_fraction;
+  p.tiller_base_radial_offset = tiller_base_radial_offset;
   p.tiller_leaf_count_ratio = tiller_leaf_count_ratio;
   p.tiller_height_ratio = tiller_height_ratio;
   p.tiller_leaf_area_ratio_by_origin = tiller_leaf_area_ratio_by_origin;
@@ -944,6 +946,7 @@ bool SorghumLSDescriptor::DrawEditorControls(const std::shared_ptr<EditorLayer>&
     changed |= tiller_azimuth_jitter.Draw("Tiller Azimuth Jitter", 0.25f);
     changed |= tiller_same_side_splay_angle.Draw("Same-Side Tiller Splay", 0.25f);
     changed |= ImGui::DragFloat("Recovery Axis Fraction", &tiller_recovery_axis_fraction, 0.01f, 0.05f, 1.0f);
+    changed |= tiller_base_radial_offset.Draw("Tiller Base Radial Offset (m)", 0.001f);
     changed |= tiller_leaf_count_ratio.Draw("Tiller/Main Leaf Count Ratio", 0.01f);
     changed |= tiller_height_ratio.Draw("Tiller/Main Culm-Tip Height Ratio", 0.01f);
     changed |= inspect_plotted_distribution("Tiller Leaf Area Ratio by Origin", tiller_leaf_area_ratio_by_origin);
@@ -1250,6 +1253,7 @@ void l_system_package::SerializeSorghumLSDescriptor(YAML::Emitter& out, const So
   target.tiller_azimuth_jitter.Save("tiller_azimuth_jitter", out);
   target.tiller_same_side_splay_angle.Save("tiller_same_side_splay_angle", out);
   out << YAML::Key << "tiller_recovery_axis_fraction" << YAML::Value << target.tiller_recovery_axis_fraction;
+  target.tiller_base_radial_offset.Save("tiller_base_radial_offset", out);
   target.tiller_leaf_count_ratio.Save("tiller_leaf_count_ratio", out);
   target.tiller_height_ratio.Save("tiller_height_ratio", out);
   target.tiller_leaf_area_ratio_by_origin.Save("tiller_leaf_area_ratio_by_origin", out);
@@ -1425,6 +1429,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   auto& tiller_azimuth_jitter = target.tiller_azimuth_jitter;
   auto& tiller_same_side_splay_angle = target.tiller_same_side_splay_angle;
   auto& tiller_recovery_axis_fraction = target.tiller_recovery_axis_fraction;
+  auto& tiller_base_radial_offset = target.tiller_base_radial_offset;
   auto& tiller_leaf_count_ratio = target.tiller_leaf_count_ratio;
   auto& tiller_height_ratio = target.tiller_height_ratio;
   auto& tiller_leaf_area_ratio_by_origin = target.tiller_leaf_area_ratio_by_origin;
@@ -1613,6 +1618,7 @@ void l_system_package::DeserializeSorghumLSDescriptor(const YAML::Node& in, Sorg
   if (in["tiller_recovery_axis_fraction"]) {
     tiller_recovery_axis_fraction = in["tiller_recovery_axis_fraction"].as<float>();
   }
+  LoadSingleDistributionWithScalarFallback(in, "tiller_base_radial_offset", tiller_base_radial_offset);
   LoadSingleDistributionWithScalarFallback(in, "tiller_leaf_count_ratio", tiller_leaf_count_ratio);
   LoadSingleDistributionWithScalarFallback(in, "tiller_height_ratio", tiller_height_ratio);
   tiller_leaf_area_ratio_by_origin.Load("tiller_leaf_area_ratio_by_origin", in);
@@ -1829,6 +1835,7 @@ void SorghumLSDescriptor::RegisterExplorableAxes(ParamSpaceExplorer& explorer) {
   explorer.AddSingle("tiller_final_lean_angle", "TFL", d.tiller_final_lean_angle, -30.0f, 30.0f, 30.0f);
   explorer.AddSingle("tiller_azimuth_jitter", "TAJ", d.tiller_azimuth_jitter, -45.0f, 45.0f, 45.0f);
   explorer.AddSingle("tiller_same_side_splay_angle", "TSA", d.tiller_same_side_splay_angle, 0.0f, 45.0f, 20.0f);
+  explorer.AddSingle("tiller_base_radial_offset", "TBO", d.tiller_base_radial_offset, 0.0f, 0.25f, 0.05f);
   explorer.AddSingle("tiller_leaf_count_ratio", "TLR", d.tiller_leaf_count_ratio, 0.5f, 1.1f, 0.3f);
   explorer.AddSingle("tiller_height_ratio", "THR", d.tiller_height_ratio, 0.5f, 1.1f, 0.3f);
   explorer.AddPlotted("tiller_leaf_area_ratio_by_origin", "TAR", d.tiller_leaf_area_ratio_by_origin);

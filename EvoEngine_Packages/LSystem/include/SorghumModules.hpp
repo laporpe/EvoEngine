@@ -63,6 +63,7 @@ struct SorghumApex {
   float thickness_ratio = 1.0f;
   float axis_length_scale = 1.0f;
   float development_rate_scale = 1.0f;
+  float base_radial_offset = 0.0f;  ///< Lateral crown offset of a tiller base (m).
 };
 
 struct SorghumInternode {
@@ -83,6 +84,10 @@ struct SorghumInternode {
   int axis_phytomer_count = 0;
   float development_rate_scale = 1.0f;
   float node_random = 0.5f;
+  /// Lateral displacement of this internode's base from its parent axis (m).
+  /// Non-zero only on the first internode of a tiller: real tillers emerge
+  /// beside the culm rather than from a point shared with it.
+  float base_radial_offset = 0.0f;
   ContinuousGrowthState continuous_growth{};
 };
 
@@ -178,6 +183,7 @@ struct SorghumTillerBud {
   float target_height_ratio = 0.90f;
   float leaf_linear_scale = 1.0f;
   float lateral_thickness_ratio = 0.80f;  ///< Tiller stem thickness vs main culm.
+  float base_radial_offset = 0.0f;        ///< Lateral crown offset from the culm (m).
   float axis_length_scale = 1.0f;
   float node_random = 0.5f;
 };

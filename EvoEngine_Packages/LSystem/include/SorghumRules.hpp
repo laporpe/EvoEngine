@@ -125,6 +125,7 @@ struct SampledSorghumParams {
   evo_engine::SingleDistribution<float> tiller_height_ratio{0.90f, 0.03f};
   evo_engine::PlottedDistribution<float> tiller_leaf_area_ratio_by_origin;
   evo_engine::SingleDistribution<float> tiller_thickness_ratio{0.80f};
+  evo_engine::SingleDistribution<float> tiller_base_radial_offset{0.0f};
   float tiller_max_axis_length_ratio = 1.10f;
 
   // ===== Thermal block (verbatim layout from SampledTasselParams) =====

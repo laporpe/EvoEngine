@@ -22,6 +22,11 @@ struct SorghumLeafMeshSettings {
   float leaf_width_scale = 1.0f;
   float leaf_thickness = 0.001f;
   glm::vec3 gravity_local_m_s2 = glm::vec3(0.0f, -9.80665f, 0.0f);
+  /// Stop blades passing through the soil. A leaf that droops far enough
+  /// rests along the ground instead of sinking below it.
+  bool clamp_blade_to_ground = true;
+  /// Height of the soil surface in the same local frame as the spline.
+  float ground_plane_y = 0.0f;
 };
 
 struct SorghumLeafAtlasLayout {

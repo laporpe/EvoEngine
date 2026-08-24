@@ -269,6 +269,7 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
         bud.leaf_linear_scale = std::sqrt(leaf_area_ratio);
         bud.lateral_thickness_ratio =
             std::clamp(SampleDistribution(params.tiller_thickness_ratio, node_rng), 0.05f, 1.2f);
+        bud.base_radial_offset = std::max(0.0f, SampleDistribution(params.tiller_base_radial_offset, node_rng));
         bud.axis_length_scale = ComputeTillerAxisLengthScale(params, ctx.graph.data.main_internode_target_lengths,
                                                              bud.lateral_phytomer_count, bud.insertion_angle,
                                                              bud.final_lean_angle, bud.target_height_ratio);
@@ -473,6 +474,7 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
             ComputeSorghumTillerInternodeBranchAngle(rank, apex.axis_phytomer_count, apex.insertion_angle,
                                                      apex.final_lean_angle, params.tiller_recovery_axis_fraction);
         internode.roll_angle = first_lateral_internode ? apex.axis_base_roll_angle : 0.0f;
+        internode.base_radial_offset = first_lateral_internode ? apex.base_radial_offset : 0.0f;
         internode.bend_axis_local = glm::vec3(1.0f, 0.0f, 0.0f);
         internode.curvature = 0.0f;
         internode.rank = rank;
@@ -632,6 +634,7 @@ std::vector<SorghumRule> CreateSorghumTopologyRules(const SampledSorghumParams& 
       apex.leaf_linear_scale = bud.leaf_linear_scale;
       apex.thickness_ratio = bud.lateral_thickness_ratio;
       apex.axis_length_scale = bud.axis_length_scale;
+      apex.base_radial_offset = bud.base_radial_offset;
       s.data.Set<SorghumApex>(apex);
       s.symbol_id = SorghumSymbol::Apex;
       result.successors.push_back(std::move(s));
