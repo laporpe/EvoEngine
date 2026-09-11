@@ -21,7 +21,13 @@
 #include "Prefab.hpp"
 #include "ProjectManager.hpp"
 #include "RayTracerCamera.hpp"
+#include "Cubemap.hpp"
+#include "EnvironmentalMap.hpp"
+#include "SkyIllumination.hpp"
+#include "Sorghum.hpp"
 #include "SorghumCoordinates.hpp"
+#include "SorghumDescriptor.hpp"
+#include "SorghumGrowthStages.hpp"
 #include "SorghumLS.hpp"
 #include "SorghumLSDescriptor.hpp"
 #include "SorghumLeafMesh.hpp"
@@ -1355,6 +1361,150 @@ Entity PyDigitalAgriculture::CreateEntityFromSorghumDescriptor(const Handle& sor
   return DatasetGenerator::CreateSorghumEntity(sorghum_asset);
 }
 
+Entity PyDigitalAgriculture::CreateEntityFromSorghumGrowthStages(const Handle& growth_stages_handle,
+                                                                 const float time) {
+  const auto asset = PyEvoEngine::GetAsset(growth_stages_handle);
+  if (!asset || asset->GetTypeName() != "SorghumGrowthStages") {
+    EVOENGINE_ERROR("CreateEntityFromSorghumGrowthStages failed: invalid asset type!")
+    return {};
+  }
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return {};
+  }
+  const auto growth_stages = std::dynamic_pointer_cast<SorghumGrowthStages>(asset);
+  const auto entity = scene->CreateEntity("SorghumGrowthStages");
+  const auto sorghum = scene->GetOrSetPrivateComponent<Sorghum>(entity).lock();
+  const auto descriptor = AssetManager::CreateTemporaryAsset<SorghumDescriptor>();
+  growth_stages->Apply(descriptor, time);
+  sorghum->sorghum_growth_stages = asset;
+  sorghum->sorghum_descriptor = descriptor;
+  sorghum->GenerateGeometryEntities(SorghumMeshGeneratorSettings{});
+  return entity;
+}
+
+size_t PyDigitalAgriculture::SetSorghumGrowthStagesTime(const float time, const bool regenerate_geometry) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  size_t plant_count = 0;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<Sorghum>()) {
+    const std::vector<Entity> entities = *owners;
+    for (const auto& entity : entities) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto sorghum = scene->GetOrSetPrivateComponent<Sorghum>(entity).lock();
+      if (!sorghum) {
+        continue;
+      }
+      const auto growth_stages = sorghum->sorghum_growth_stages.Get<SorghumGrowthStages>();
+      if (!growth_stages) {
+        continue;
+      }
+      auto descriptor = sorghum->sorghum_descriptor.Get<SorghumDescriptor>();
+      if (!descriptor) {
+        descriptor = AssetManager::CreateTemporaryAsset<SorghumDescriptor>();
+        sorghum->sorghum_descriptor = descriptor;
+      }
+      growth_stages->Apply(descriptor, time);
+      if (regenerate_geometry) {
+        sorghum->GenerateGeometryEntities(SorghumMeshGeneratorSettings{});
+      }
+      ++plant_count;
+    }
+  }
+  return plant_count;
+}
+
+bool PyDigitalAgriculture::SetNishitaSky(const float sun_azimuth_degrees,
+                                        const float sun_elevation_degrees,
+                                        const float atmosphere_intensity, const float gamma,
+                                        const uint32_t resolution,
+                                        const bool update_directional_light,
+                                        const float light_brightness) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return false;
+  }
+  // Screen/world convention here matches the rest of the sorghum tooling: +Y is
+  // up, azimuth sweeps from +X toward +Z.
+  const float elevation = glm::radians(sun_elevation_degrees);
+  const float azimuth = glm::radians(sun_azimuth_degrees);
+  const glm::vec3 sun_direction = glm::normalize(glm::vec3(
+      std::cos(elevation) * std::cos(azimuth), std::sin(elevation),
+      std::cos(elevation) * std::sin(azimuth)));
+
+  SkyIllumination sky_illumination{};
+  sky_illumination.sun_direction = sun_direction;
+  sky_illumination.gamma = std::max(0.01f, gamma);
+  sky_illumination.atmosphere.intensity = std::max(0.0f, atmosphere_intensity);
+
+  // Image-based lighting for the scene...
+  const auto environmental_map = AssetManager::CreateTemporaryAsset<EnvironmentalMap>();
+  environmental_map->BuildSkyIllumination(sky_illumination, std::max(16u, resolution));
+  scene->environment.environmental_map = environmental_map;
+  scene->environment.environment_type = Scene::EnvironmentType::EnvironmentalMap;
+  scene->environment.environment_gamma = sky_illumination.gamma;
+
+  // ...and the same atmosphere as the visible backdrop, otherwise the camera
+  // clears to a flat colour and the sunrise is only visible in the lighting.
+  const auto sky_cubemap = AssetManager::CreateTemporaryAsset<Cubemap>();
+  sky_cubemap->BuildSkyIllumination(sky_illumination, std::max(16u, resolution));
+  if (const auto camera = scene->main_camera.Get<Camera>()) {
+    camera->skybox = sky_cubemap;
+    camera->camera_settings.use_clear_color = false;
+  }
+
+  // Skylight falls away with the sun. Without this the ground stays lit at dusk.
+  const float daylight = glm::clamp(std::sin(elevation), 0.0f, 1.0f);
+  scene->environment.background_intensity = 1.0f;
+  scene->environment.ambient_light_intensity = 0.08f + 0.62f * daylight;
+
+  if (update_directional_light) {
+    // A directional light travels along its own -Z. Aim that at the ground from
+    // the sun's position, and fade it out as the sun reaches the horizon so dawn
+    // and dusk do not stay lit like noon.
+    const float above = glm::clamp(std::sin(elevation), 0.0f, 1.0f);
+    // The renderer takes a directional light's direction as rotation * +Z, while
+    // glm::quatLookAt aligns -Z with its argument. Passing the sun direction here
+    // therefore makes +Z point from the sun down onto the scene.
+    const glm::quat rotation = glm::quatLookAt(sun_direction, glm::vec3(0, 1, 0));
+    if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<DirectionalLight>()) {
+      const std::vector<Entity> entities = *owners;
+      for (const auto& entity : entities) {
+        if (!scene->IsEntityValid(entity)) {
+          continue;
+        }
+        auto transform = scene->GetDataComponent<Transform>(entity);
+        transform.SetRotation(rotation);
+        scene->SetDataComponent(entity, transform);
+        if (const auto light = scene->GetOrSetPrivateComponent<DirectionalLight>(entity).lock()) {
+          light->diffuse_brightness = light_brightness * above;
+          // Warm the beam as it grazes the horizon: long air path scatters blue out.
+          const float warmth = 1.0f - above;
+          light->diffuse = glm::vec3(1.0f, 1.0f - 0.35f * warmth, 1.0f - 0.72f * warmth);
+        }
+      }
+    }
+    TransformGraph::CalculateTransformGraphs(scene);
+  }
+  return true;
+}
+
+bool PyDigitalAgriculture::SetEntityPosition(const Entity& entity, const glm::vec3& position) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene || !scene->IsEntityValid(entity)) {
+    return false;
+  }
+  auto transform = scene->GetDataComponent<Transform>(entity);
+  transform.SetPosition(position);
+  scene->SetDataComponent(entity, transform);
+  TransformGraph::CalculateTransformGraphs(scene);
+  return true;
+}
+
 Entity PyDigitalAgriculture::CreateEntityFromSorghumGenerator(const Handle& sorghum_generator_handle, const int seed) {
   const auto sorghum_asset = PyEvoEngine::GetAsset(sorghum_generator_handle);
   if (sorghum_asset->GetTypeName() != "SorghumGenerator") {
@@ -1386,6 +1536,15 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
   m.def("CreateEntityFromSorghumState", &CreateEntityFromSorghumState);
   m.def("CreateEntityFromSorghumDescriptor", &CreateEntityFromSorghumDescriptor);
   m.def("CreateEntityFromSorghumGenerator", &CreateEntityFromSorghumGenerator);
+  m.def("CreateEntityFromSorghumGrowthStages", &CreateEntityFromSorghumGrowthStages,
+        py::arg("growth_stages_handle"), py::arg("time") = 0.0f);
+  m.def("SetSorghumGrowthStagesTime", &SetSorghumGrowthStagesTime, py::arg("time"),
+        py::arg("regenerate_geometry") = true);
+  m.def("SetEntityPosition", &SetEntityPosition, py::arg("entity"), py::arg("position"));
+  m.def("SetNishitaSky", &SetNishitaSky, py::arg("sun_azimuth_degrees"),
+        py::arg("sun_elevation_degrees"), py::arg("atmosphere_intensity") = 1.0f,
+        py::arg("gamma") = 2.2f, py::arg("resolution") = 512,
+        py::arg("update_directional_light") = true, py::arg("light_brightness") = 3.0f);
   m.def("CreateEntityFromSorghumField", &CreateEntityFromSorghumField);
   m.def("ApplySorghumGrid", &ApplySorghumGrid);
   m.def("EnableBTF", &EnableBTF);

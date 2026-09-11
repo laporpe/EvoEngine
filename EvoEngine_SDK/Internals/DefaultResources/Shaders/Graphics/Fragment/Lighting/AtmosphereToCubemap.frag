@@ -1,3 +1,4 @@
+#extension GL_GOOGLE_include_directive : require
 precision highp float;
 layout (location = 0) out vec4 FragColor;
 layout (location = 0) in vec3 inWorldPos;

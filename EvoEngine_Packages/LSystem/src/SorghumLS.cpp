@@ -1049,7 +1049,12 @@ void SorghumLS::PublishGeometrySnapshot(const std::shared_ptr<const SorghumGeome
   }
   if (const auto material = panicle_renderer->material.Get<Material>()) {
     material->vertex_color_only = true;
-    material->material_properties.albedo_color = glm::vec3(1.0f);
+    // The Vulkan raster path ignores vertex_color_only and shades with the albedo, so a white
+    // albedo renders white panicles in captures; give it the mid-maturity panicle color. The
+    // ray tracer keeps using the per-vertex colors.
+    material->material_properties.albedo_color =
+        glm::mix(descriptor ? descriptor->panicle_immature_color : glm::vec3(0.32f, 0.56f, 0.16f),
+                 descriptor ? descriptor->panicle_mature_color : glm::vec3(0.48f, 0.16f, 0.07f), 0.5f);
     material->material_properties.roughness = descriptor ? descriptor->panicle_material_roughness : 0.78f;
     material->material_properties.metallic = 0.0f;
     material->material_properties.specular = 0.35f;

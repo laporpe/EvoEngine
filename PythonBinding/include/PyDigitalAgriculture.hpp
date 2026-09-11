@@ -251,6 +251,20 @@ class PyDigitalAgriculture {
   static void PushSorghumLayer();
   static void RegisterClasses();
   static Entity CreateEntityFromSorghumState(const Handle& sorghum_handle);
+  /// Instantiate a SorghumGrowthStages (.sgs) asset, interpolated at `time`.
+  /// Time is whatever axis the .sgs was authored on - cumulative GDD for the
+  /// field-derived files.
+  static Entity CreateEntityFromSorghumGrowthStages(const Handle& growth_stages_handle, float time);
+  /// Re-interpolate every growth-stage plant in the scene to `time`.
+  static size_t SetSorghumGrowthStagesTime(float time, bool regenerate_geometry);
+  /// Move an entity in world space; returns false if the entity is invalid.
+  static bool SetEntityPosition(const Entity& entity, const glm::vec3& position);
+  /// Build a physically-based Nishita atmosphere sky for the rasteriser and
+  /// point the scene's directional light along it. Azimuth and elevation are in
+  /// degrees; elevation 0 is the horizon. Returns false if there is no scene.
+  static bool SetNishitaSky(float sun_azimuth_degrees, float sun_elevation_degrees,
+                            float atmosphere_intensity, float gamma, uint32_t resolution,
+                            bool update_directional_light, float light_brightness);
   static Entity CreateEntityFromSorghumDescriptor(const Handle& sorghum_handle);
   static Entity CreateEntityFromSorghumGenerator(const Handle& sorghum_generator_handle, int seed);
   static Entity CreateEntityFromSorghumField(const Handle& sorghum_generator_handle, int seed);
