@@ -1,0 +1,1160 @@
+total_phytomer_count:
+  mean: 13.2
+  deviation: 0.4472136
+phyllotaxis_angle:
+  mean: 180
+  deviation: 0
+branch_azimuth_offset:
+  mean: 0
+  deviation: 15
+main_culm_lean_angle:
+  mean: 0
+  deviation: 0
+internode_length:
+  mean:
+    min_value: 0
+    max_value: 0.369
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 1]
+        - [0.14285714, 0.21680217]
+        - [0.28571429, 0.18699187]
+        - [0.42857143, 0.12737127]
+        - [0.57142857, 0.16531165]
+        - [0.71428571, 0.097560976]
+        - [0.85714286, 0.18157182]
+        - [1, 0.14001807]
+  deviation:
+    min_value: 0
+    max_value: 0.10261579
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+internode_thickness:
+  mean:
+    min_value: 0
+    max_value: 0.035155476
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.99011112]
+        - [0.14285714, 1]
+        - [0.28571429, 0.98679383]
+        - [0.42857143, 0.94598492]
+        - [0.57142857, 0.87689384]
+        - [0.71428571, 0.80409783]
+        - [0.85714286, 0.69716604]
+        - [1, 0.55750332]
+  deviation:
+    min_value: 0
+    max_value: 0.0032757395
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+leaf_blade_length:
+  mean:
+    min_value: 0
+    max_value: 1.006
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.67992048]
+        - [0.083333333, 0.79125249]
+        - [0.16666667, 0.87176938]
+        - [0.25, 0.94930417]
+        - [0.33333333, 1]
+        - [0.41666667, 0.99900596]
+        - [0.5, 0.89363817]
+        - [0.58333333, 0.90357853]
+        - [0.66666667, 0.90457256]
+        - [0.75, 0.88270378]
+        - [0.83333333, 0.78827038]
+        - [0.91666667, 0.52485089]
+        - [1, 0.33399602]
+  deviation:
+    min_value: 0
+    max_value: 0.24618083
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+leaf_blade_max_width:
+  mean:
+    min_value: 0
+    max_value: 0.091
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.86080586]
+        - [0.090909091, 0.8021978]
+        - [0.18181818, 0.84615385]
+        - [0.27272727, 0.92307692]
+        - [0.36363636, 0.82417582]
+        - [0.45454545, 0.87912088]
+        - [0.54545455, 0.9010989]
+        - [0.63636364, 0.96703297]
+        - [0.72727273, 0.97802198]
+        - [0.81818182, 1]
+        - [0.90909091, 0.98901099]
+        - [1, 0.82417582]
+  deviation:
+    min_value: 0
+    max_value: 0.015652476
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+leaf_blade_thickness:
+  mean:
+    min_value: 0.0005
+    max_value: 0.0005
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [1, 0.5]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_sheath_thickness:
+  mean:
+    min_value: 0.0004
+    max_value: 0.0004
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [1, 0.5]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_sheath_length:
+  mean:
+    min_value: 0.144
+    max_value: 0.213
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0.1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+leaf_neck_length:
+  mean:
+    min_value: 0
+    max_value: 0.116
+    curve:
+      tangent_: true
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [-0.1, 0]
+        - [0, 0.254]
+        - [0.1, 0]
+        - [-0.1, 0]
+        - [0.201, 0.55]
+        - [0.1, 0]
+        - [-0.35657895, 0.0049737226]
+        - [1, 0.519]
+        - [0.1, 0]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: true
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [-0.1, 0]
+        - [0, 0.5]
+        - [0.1, 0]
+        - [-0.1, 0]
+        - [1, 0.5]
+        - [0.1, 0]
+leaf_sheath_end_width_ratio:
+  mean:
+    min_value: 1.5
+    max_value: 1.5
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_neck_end_width_ratio:
+  mean:
+    min_value: 3
+    max_value: 3
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_blade_end_width_ratio:
+  mean:
+    min_value: 0.05
+    max_value: 0.05
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_insertion_angle:
+  mean:
+    min_value: 0
+    max_value: 72
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.82222222]
+        - [0.076923077, 1]
+        - [0.15384615, 0.85555556]
+        - [0.23076923, 0.67222222]
+        - [0.30769231, 0.81111111]
+        - [0.38461538, 0.57222222]
+        - [0.46153846, 0.57777778]
+        - [0.53846154, 0.52777778]
+        - [0.61538462, 0.42222222]
+        - [0.69230769, 0.42222222]
+        - [0.76923077, 0.31111111]
+        - [0.84615385, 0.27777778]
+        - [0.92307692, 0.16203704]
+        - [1, 0.11111111]
+  deviation:
+    min_value: 0
+    max_value: 21.870071
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+leaf_roll_angle:
+  mean:
+    min_value: -1
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.502]
+        - [1, 0.503]
+  deviation:
+    min_value: 0
+    max_value: 16
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.745]
+        - [1, 1]
+leaf_curling:
+  mean:
+    min_value: 0
+    max_value: 90
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.70]
+        - [0.2, 0.90]
+        - [0.6, 0.85]
+        - [0.82, 0.68]
+        - [0.94, 0.45]
+        - [1, 0.30]
+  deviation:
+    min_value: 0
+    max_value: 8
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [1, 0.5]
+leaf_bending:
+  mean:
+    min_value: 0
+    max_value: 135
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 1]
+        - [1, 0.62962963]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [0.85, 0.35]
+        - [1, 0]
+leaf_waviness:
+  mean:
+    min_value: 0
+    max_value: 0.0025
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.55]
+        - [0.25, 0.8]
+        - [0.55, 1]
+        - [0.8, 0.85]
+        - [1, 0.5]
+  deviation:
+    min_value: 0
+    max_value: 0.0008
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [1, 0.5]
+leaf_waviness_frequency:
+  mean: 3
+  deviation: 0.75
+leaf_waviness_width_fraction:
+  mean:
+    min_value: 0
+    max_value: 0.24
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.45]
+        - [0.25, 0.75]
+        - [0.55, 0.85]
+        - [0.8, 0.65]
+        - [1, 0.35]
+  deviation:
+    min_value: 0
+    max_value: 0.04
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.5]
+        - [1, 0.5]
+leaf_waviness_wavelength_m:
+  mean: 0.16
+  deviation: 0.02
+leaf_centerline_waviness_fraction:
+  mean: 0.008
+  deviation: 0.003
+leaf_static_wind_deflection_fraction:
+  mean: 0.018
+  deviation: 0.006
+leaf_axial_twist_max_degrees:
+  mean: 30
+  deviation: 0
+leaf_axial_twist_frequency_ratio_min:
+  mean: 0.35
+  deviation: 0
+leaf_axial_twist_frequency_ratio_max:
+  mean: 0.5
+  deviation: 0
+leaf_gravity_droop_compliance:
+  mean: 0.02
+  deviation: 0
+leaf_gravity_droop_age_response:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.45, 0]
+        - [0.65, 0.15]
+        - [0.82, 0.55]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_flexural_stiffness_along_leaf:
+  mean:
+    min_value: 0.02
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 1]
+        - [0.3, 0.9]
+        - [0.6, 0.6]
+        - [0.82, 0.3]
+        - [1, 0]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_damage_severity:
+  mean: 0.03
+  deviation: 0.02
+leaf_sheath_radius_ratio:
+  mean: 1.05
+  deviation: 0
+leaf_sheath_cross_section_ratio:
+  mean: 1.4
+  deviation: 0.08
+leaf_sheath_wrap_angle:
+  mean: 390
+  deviation: 0
+leaf_blade_stage1_length_ratio:
+  mean: 0.33
+  deviation: 0
+leaf_blade_stage2_length_ratio:
+  mean: 0.34
+  deviation: 0
+leaf_blade_stage3_length_ratio:
+  mean: 0.33
+  deviation: 0
+leaf_blade_stage1_width_scale:
+  mean: 0.85
+  deviation: 0
+leaf_blade_stage2_width_scale:
+  mean: 1
+  deviation: 0
+leaf_blade_stage3_width_scale:
+  mean: 0.4
+  deviation: 0
+leaf_lifespan_years:
+  mean: 2.5
+  deviation: 0
+leaf_wilting_years:
+  mean: 0.5
+  deviation: 0
+tiller_model_version: 4
+tiller_count:
+  mean: 2.8
+  deviation: 0.83666003
+tiller_count_min: 1
+tiller_count_max: 5
+tiller_origin_rank_order: [3, 4, 2, 1, 5, 6]
+tiller_emergence_main_leaf_stages: [5, 5, 6, 7, 8, 9]
+tiller_initiation_delay_gdd:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+tiller_insertion_angle:
+  mean: 11.5
+  deviation: 2
+tiller_final_lean_angle:
+  mean: 11.5
+  deviation: 4.4478
+tiller_azimuth_jitter:
+  mean: 0
+  deviation: 45
+tiller_same_side_splay_angle:
+  mean: 12
+  deviation: 0
+tiller_recovery_axis_fraction: 0.5
+tiller_base_radial_offset:
+  mean: 0.031327
+  deviation: 0.00294817
+tiller_leaf_count_ratio:
+  mean: 0.9
+  deviation: 0.03
+tiller_height_ratio:
+  mean: 0.9
+  deviation: 0.03
+tiller_emergent_height: true
+tiller_leaf_count_ratio_quantiles:
+  mean:
+    min_value: 0
+    max_value: 1.21212
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.0625]
+        - [0.0416667, 0.0625]
+        - [0.125, 0.25]
+        - [0.208333, 0.3125]
+        - [0.291667, 0.4375]
+        - [0.375, 0.625]
+        - [0.458333, 0.6875]
+        - [0.541667, 0.6875]
+        - [0.625, 0.75]
+        - [0.708333, 0.8125]
+        - [0.791667, 0.8125]
+        - [0.875, 0.9375]
+        - [0.958333, 1]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+tiller_thickness_ratio:
+  mean: 0.8
+  deviation: 0.05
+tiller_max_axis_length_ratio:
+  mean: 1.1
+  deviation: 0
+target_gdd:
+  mean: 660
+  deviation: 0
+gdd_per_day:
+  mean: 10
+  deviation: 0
+plastochron_gdd:
+  mean: 30
+  deviation: 0
+maturity_gdd:
+  mean: 240
+  deviation: 0
+main_axis_plastochron_scale:
+  mean: 1
+  deviation: 0
+lateral_axis_plastochron_scale:
+  mean: 0.6
+  deviation: 0
+lateral_bud_plastochron_scale:
+  mean: 1
+  deviation: 0
+maturity_initiation_coupling:
+  mean: 0
+  deviation: 0
+reference_maturity_gdd:
+  mean: 240
+  deviation: 0
+finalize_snapshot_morphology: true
+internode_elongation_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.35, 0.04]
+        - [0.6, 0.30]
+        - [0.8, 0.75]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+internode_thickness_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_sheath_length_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.25, 0.50]
+        - [0.5, 0.85]
+        - [0.75, 1]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_neck_length_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.45, 0.10]
+        - [0.7, 0.55]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_blade_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.2, 0.15]
+        - [0.5, 0.60]
+        - [0.8, 0.93]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_sheath_width_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_neck_width_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_width_growth_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.35, 0.25]
+        - [0.65, 0.75]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_angle_development_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.3, 0.05]
+        - [0.55, 0.25]
+        - [0.75, 0.65]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_curling_development_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.4, 0.15]
+        - [0.7, 0.55]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_bending_development_curve:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.45, 0.05]
+        - [0.7, 0.35]
+        - [0.88, 0.75]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+width_along_sheath:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+width_along_neck:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.125, 0.125]
+        - [0.25, 0.25]
+        - [0.375, 0.375]
+        - [0.5, 0.5]
+        - [0.625, 0.625]
+        - [0.75, 0.75]
+        - [0.875, 0.875]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+width_along_leaf:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0.35]
+        - [0.15, 0.60]
+        - [0.35, 0.70]
+        - [0.55, 0.62]
+        - [0.8, 0.35]
+        - [1, 0]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+bending_along_leaf:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.3, 0]
+        - [0.5, 0.0225]
+        - [0.7, 0.27]
+        - [0.88, 0.9]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+curling_along_leaf:
+  mean:
+    min_value: 1
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 1]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+waviness_along_leaf:
+  mean:
+    min_value: 0
+    max_value: 1
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [0.08, 0.45]
+        - [0.25, 0.9]
+        - [0.55, 1]
+        - [0.8, 0.9]
+        - [1, 0.45]
+  deviation:
+    min_value: 0
+    max_value: 0
+    curve:
+      tangent_: false
+      min_: [0, 0]
+      max_: [1, 1]
+      values_:
+        - [0, 0]
+        - [1, 0]
+leaf_atlas_albedo_texture:
+  asset_handle_: 913438399874542895
+  type_name_: Texture2D
+leaf_atlas_normal_texture:
+  asset_handle_: 16274067819183808559
+  type_name_: Texture2D
+leaf_atlas_roughness_texture:
+  asset_handle_: 10726845117192562584
+  type_name_: Texture2D
+leaf_atlas_metallic_texture:
+  asset_handle_: 1515340455861490593
+  type_name_: Texture2D
+leaf_atlas_ao_texture:
+  asset_handle_: 14134527901361027643
+  type_name_: Texture2D
+leaf_atlas_variant_columns: 3
+leaf_atlas_variant_rows: 3
+leaf_atlas_variant_count: 9
+leaf_atlas_tile_uv_inset: 0.001
+leaf_atlas_distal_region_uses_top_half: true
+leaf_atlas_semantic_quadrants: false
+leaf_material_albedo_color: [1, 1, 1]
+leaf_material_roughness: 0.72
+leaf_material_metallic: 0
+leaf_material_specular: 0.45
+leaf_material_subsurface_factor: 0
+leaf_material_subsurface_color: [0.26, 0.52, 0.18]
+leaf_material_subsurface_radius: [0.001, 0.001, 0.001]
+stem_albedo_texture:
+  asset_handle_: 11677113829394799981
+  type_name_: Texture2D
+stem_normal_texture:
+  asset_handle_: 15939859271237366179
+  type_name_: Texture2D
+stem_roughness_texture:
+  asset_handle_: 13467941576064353144
+  type_name_: Texture2D
+stem_metallic_texture:
+  asset_handle_: 7946515516638111996
+  type_name_: Texture2D
+stem_ao_texture:
+  asset_handle_: 9007124116920053463
+  type_name_: Texture2D
+stem_material_albedo_color: [1, 1, 1]
+stem_material_roughness: 0.74
+stem_material_metallic: 0
+stem_material_specular: 0.4
+culm_radial_segments: 24
+culm_node_radius_scale: 1.08
+culm_texture_repeat_m: 0.25
+live_preview: false
+live_preview_representative_only: true
+live_preview_cap_target_gdd: true
+grid_rows: 5
+grid_cols: 5
+grid_spacing: 2
+explorer_mode: 0
+explorer_speed: 1
+tropism_count: 0
+enable_panicle: false
