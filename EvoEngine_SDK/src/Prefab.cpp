@@ -1285,6 +1285,21 @@ bool Prefab::SaveModelInternal(const std::filesystem::path& path) const {
 
     exporter_material->AddProperty(&material_name, AI_MATKEY_NAME);
 
+    // Surface colour and factors. Without these every material imports as flat
+    // white, which is invisible on textured leaves but turns stems and panicles
+    // into blank geometry.
+    const auto& properties = material->material_properties;
+    const aiColor3D albedo(properties.albedo_color.x, properties.albedo_color.y,
+                           properties.albedo_color.z);
+    exporter_material->AddProperty(&albedo, 1, AI_MATKEY_COLOR_DIFFUSE);
+    exporter_material->AddProperty(&albedo, 1, AI_MATKEY_BASE_COLOR);
+    const ai_real metallic = properties.metallic;
+    const ai_real roughness = properties.roughness;
+    const ai_real specular = properties.specular;
+    exporter_material->AddProperty(&metallic, 1, AI_MATKEY_METALLIC_FACTOR);
+    exporter_material->AddProperty(&roughness, 1, AI_MATKEY_ROUGHNESS_FACTOR);
+    exporter_material->AddProperty(&specular, 1, AI_MATKEY_SPECULAR_FACTOR);
+
     if (const auto albedo_texture = material->GetAlbedoTexture()) {
       const auto search = collected_texture.find(albedo_texture);
       SeparatedTexturePath info{};
