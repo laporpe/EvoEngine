@@ -1599,6 +1599,7 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("horizontal_subdivision_step"), py::arg("bottom_face") = true, py::arg("enable_leaf_sheath") = true,
         py::arg("regenerate_geometry") = false);
   m.def("SetSorghumLsFinalizeSnapshotMorphology", &SetSorghumLsFinalizeSnapshotMorphology, py::arg("enabled"));
+  m.def("ExportSorghumLsPlantsAsModel", &ExportSorghumLsPlantsAsModel, py::arg("path"));
   m.def("ConfigureSorghumLsPaniclePresentation", &ConfigureSorghumLsPaniclePresentation, py::arg("peduncle_length_m"),
         py::arg("rachis_length_m"), py::arg("branch_length_m"), py::arg("primary_branch_count"),
         py::arg("spikelet_pairs_per_branch"), py::arg("spikelet_length_m"), py::arg("spikelet_radius_m"),
@@ -2696,6 +2697,56 @@ size_t PyDigitalAgriculture::ConfigureSorghumLsLeafMeshQuality(const float verti
     TransformGraph::CalculateTransformGraphs(scene);
   }
   return plant_count;
+}
+
+size_t PyDigitalAgriculture::ExportSorghumLsPlantsAsModel(const std::filesystem::path& path) {
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    return 0;
+  }
+  if (!path.is_absolute()) {
+    EVOENGINE_ERROR("ExportSorghumLsPlantsAsModel failed: not an absolute path!")
+    return 0;
+  }
+  if (ProjectManager::IsInAssetsFolder(path)) {
+    EVOENGINE_ERROR("ExportSorghumLsPlantsAsModel failed: file is inside the assets folder!")
+    return 0;
+  }
+  auto directory = path;
+  directory.remove_filename();
+  if (!directory.empty()) {
+    std::error_code code;
+    std::filesystem::create_directories(directory, code);
+  }
+
+  // One Prefab per plant, gathered under a single root so the export carries the
+  // whole stand in one file with each plant kept as its own node. FromEntity
+  // walks children itself, so the leaf and culm mesh renderers come along.
+  const auto root = AssetManager::CreateTemporaryAsset<Prefab>();
+  root->instance_name = "SorghumLsPlants";
+
+  size_t captured = 0;
+  if (const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>()) {
+    for (const auto& entity : *owners) {
+      if (!scene->IsEntityValid(entity)) {
+        continue;
+      }
+      const auto child = AssetManager::CreateTemporaryAsset<Prefab>();
+      child->instance_name = scene->GetEntityName(entity);
+      child->FromEntity(entity);
+      root->child_prefabs.push_back(child);
+      captured++;
+    }
+  }
+  if (captured == 0) {
+    EVOENGINE_ERROR("ExportSorghumLsPlantsAsModel failed: no SorghumLS plants in the scene")
+    return 0;
+  }
+  if (!root->Export(path)) {
+    EVOENGINE_ERROR("ExportSorghumLsPlantsAsModel failed: the exporter rejected the path")
+    return 0;
+  }
+  return captured;
 }
 
 size_t PyDigitalAgriculture::SetSorghumLsFinalizeSnapshotMorphology(const bool enabled) {

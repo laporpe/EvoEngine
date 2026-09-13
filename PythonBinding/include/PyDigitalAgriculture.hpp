@@ -265,6 +265,11 @@ class PyDigitalAgriculture {
   static bool SetNishitaSky(float sun_azimuth_degrees, float sun_elevation_degrees,
                             float atmosphere_intensity, float gamma, uint32_t resolution,
                             bool update_directional_light, float light_brightness);
+  /// Capture every SorghumLS plant in the scene into one Prefab and write it to
+  /// `path`. The extension picks the format: .obj, .gltf, .glb and .blend go
+  /// through Assimp, .eveprefab writes the native format. Returns the number of
+  /// plants captured, or 0 on failure.
+  static size_t ExportSorghumLsPlantsAsModel(const std::filesystem::path& path);
   static Entity CreateEntityFromSorghumDescriptor(const Handle& sorghum_handle);
   static Entity CreateEntityFromSorghumGenerator(const Handle& sorghum_generator_handle, int seed);
   static Entity CreateEntityFromSorghumField(const Handle& sorghum_generator_handle, int seed);

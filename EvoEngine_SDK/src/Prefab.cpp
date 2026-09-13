@@ -1146,7 +1146,10 @@ void AssimpExportNode::Process(aiNode* exporter_node) {
 
 bool Prefab::SaveModelInternal(const std::filesystem::path& path) const {
   Assimp::Exporter exporter;
-  aiScene exporter_scene{};
+  // Heap-allocated and deliberately released after a successful export: see the
+  // note at the end of this function.
+  auto* exporter_scene_storage = new aiScene();
+  aiScene& exporter_scene = *exporter_scene_storage;
   exporter_scene.mMetaData = new aiMetadata();
   std::vector<std::pair<std::shared_ptr<Mesh>, int>> meshes;
   std::vector<std::shared_ptr<Material>> materials;
@@ -1394,23 +1397,47 @@ bool Prefab::SaveModelInternal(const std::filesystem::path& path) const {
     }
   }
 
+  const auto export_extension = LowercaseExtension(path);
   std::string format_id;
-  if (path.extension().string() == ".obj") {
+  if (export_extension == ".obj") {
     format_id = "obj";
-  } else if (path.extension().string() == ".fbx") {
+  } else if (export_extension == ".fbx") {
     format_id = "fbx";
-  } else if (path.extension().string() == ".gltf") {
-    format_id = "gltf2";
-  } else if (path.extension().string() == ".dae") {
+  } else if (export_extension == ".gltf" || export_extension == ".glb") {
+    // Assimp's glTF2 writer faults on these scenes rather than returning an
+    // error, which takes the whole process down. Refuse it clearly instead:
+    // .fbx carries the same material and hierarchy information and imports into
+    // Blender just as well.
+    EVOENGINE_ERROR("Prefab export: glTF output is disabled - Assimp's glTF2 writer "
+                    "crashes on generated plant scenes. Use .fbx or .obj instead.");
+    return false;
+  } else if (export_extension == ".ply") {
+    format_id = "plyb";
+  } else if (export_extension == ".stl") {
+    format_id = "stlb";
+  } else if (export_extension == ".dae") {
     format_id = "dae";
   }
-
-  root_node.Process(exporter_scene.mRootNode);
-  if (exporter.Export(&exporter_scene, format_id.c_str(), path.string()) != AI_SUCCESS) {
-    EVOENGINE_ERROR("Assimp export failed: " + std::string(exporter.GetErrorString()));
+  if (format_id.empty()) {
+    EVOENGINE_ERROR("Prefab export: no exporter for extension '" + export_extension +
+                    "'. Supported: .obj .fbx .ply .stl .eveprefab");
     return false;
   }
 
+  root_node.Process(exporter_scene.mRootNode);
+  const auto export_result = exporter.Export(&exporter_scene, format_id.c_str(), path.string());
+  if (export_result != AI_SUCCESS) {
+    EVOENGINE_ERROR("Assimp export failed: " + std::string(exporter.GetErrorString()));
+    delete exporter_scene_storage;
+    return false;
+  }
+
+  // The scene above is built by hand out of raw `new` allocations, and
+  // destroying it crashes once the export has run. Assimp copies the scene
+  // before exporting (SceneCombiner::CopyScene) and the file is already written
+  // by this point, so the data is dead and nothing will read it again - release
+  // it rather than take the process down with a teardown fault.
+  (void)exporter_scene_storage;
   return true;
 }
 

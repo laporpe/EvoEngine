@@ -102,24 +102,42 @@ A few flags worth knowing:
   follows meristem temperature, not light.
 - `--minutes-per-frame` resamples the hourly weather for short, high-frame-count windows.
 
-## Exporting to Blender — read this first
+## Exporting to Blender
 
-**There is no binding that exports a grown plant.** The engine can write `.obj`, `.gltf`,
-`.glb` and `.blend` (`Prefab.cpp`, via Assimp) and `PyEvoEngine.ExportAsset(handle, path)`
-is bound, but nothing in `PyDigitalAgriculture` turns a plant in the scene into a `Prefab`
-or hands back its mesh handles — only `CreateEntityFromPrefab`, which goes the other way.
+`abc-growth/export_plots_for_blender.py` grows the plots to a chosen thermal age
+and writes them as a model file:
 
-So a Python-driven export needs one new binding, something like
-`ExportSorghumLsPlantsAsPrefab(path)`, that walks the plant entities, collects their mesh
-renderers into a `Prefab`, and calls `Export`. The pieces it would use all exist; they are
-just not wired to Python. The alternative today is the editor GUI, where the content
-browser can export a selected asset.
+```bash
+python abc-growth/export_plots_for_blender.py --gdd 1858 --columns 5 --format fbx obj
+```
 
-Two things to expect once that path works. The plants are rebuilt every frame from the
-L-system, so an export is a snapshot at one thermal age — you would call it after growing
-to the GDD you want. And leaf geometry is generated at the quality set by
-`ConfigureSorghumLsLeafMeshQuality`, so raise it before exporting rather than using the
-value the video renders use.
+Each plant becomes its own named node, and each plant's internodes, leaves and
+panicle stay as separate objects under it - a 15-plant stand exports as 45 named
+objects, so material assignment and selection in Blender work per organ.
+
+Working formats, measured on a 15-plant stand at 874k triangles:
+
+| format | size | notes |
+|---|---|---|
+| `.fbx` | 185 MB | **use this for Blender** - materials and hierarchy |
+| `.obj` | 137 MB | plus `.mtl` and a `textures/` folder; ASCII, so large |
+| `.ply` | small | geometry only |
+| `.stl` | small | geometry only, no colour |
+| `.eveprefab` | - | native format, for round-tripping into EvoEngine |
+
+**glTF/GLB are refused by design.** Assimp's glTF2 writer faults on these scenes
+rather than returning an error, which takes the whole interpreter down. The
+engine now rejects those extensions with a message pointing at `.fbx`. `.dae` is
+not compiled into this Assimp build.
+
+Raise the mesh quality before exporting. The videos run `--leaf-vsub 0.02
+--leaf-hsub 4`, which is tuned so the subdivisions survive a 1080p pixel grid and
+no further; geometry that gets re-lit in Blender deserves more. `0.012 / 6` gives
+874k triangles for 15 plants and is a reasonable starting point.
+
+The export is a snapshot at one thermal age - the plants are rebuilt from the
+L-system at whatever GDD you grow to, so pick `--gdd` to match the growth stage
+you want rather than expecting an animated sequence.
 
 ## Interpreting the output
 
