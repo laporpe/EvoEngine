@@ -1236,10 +1236,15 @@ bool Prefab::SaveModelInternal(const std::filesystem::path& path) const {
     } else {
       exporter_mesh->mFaces = new aiFace[triangles.size()];
     }
-    const bool align_leaf_faces = mesh_names.at(mesh_index).rfind("Sorghum Leaves", 0) == 0;
+    // Align face winding to the vertex normals for every mesh, not only leaves.
+    // Restricting this to "Sorghum Leaves" left internodes exported with
+    // winding that disagrees with their normals, so importers that derive
+    // custom split normals (Blender's FBX path does) received culms whose
+    // shading normals point into the stem - path tracers render them black.
+    // Faces whose winding already agrees with the normals are left untouched.
     for (int triangle_index = 0; triangle_index < triangles.size(); triangle_index++) {
       auto triangle = triangles[triangle_index];
-      if (align_leaf_faces && triangle.x < vertices.size() && triangle.y < vertices.size() &&
+      if (triangle.x < vertices.size() && triangle.y < vertices.size() &&
           triangle.z < vertices.size()) {
         const auto& v0 = vertices.at(triangle.x);
         const auto& v1 = vertices.at(triangle.y);
