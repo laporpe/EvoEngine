@@ -32,7 +32,13 @@ SEED = 422021                       # render_field_publication.py default
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--layout", default="small", choices=sorted(LAYOUTS))
+    parser.add_argument("--layout", default="small", choices=sorted(LAYOUTS) + ["pair"],
+                        help="a layout from run_tau_diurnal, or 'pair': one BTX beside one "
+                             "Pawaga for a side-by-side comparison")
+    parser.add_argument("--columns", type=int, default=None,
+                        help="plants per row; defaults to the block's 12")
+    parser.add_argument("--row-spacing", type=float, default=None,
+                        help="metres between rows; defaults to the block's 1.0")
     parser.add_argument("--btx-descriptor", default="BTX623_20210726_cal1.sorghumls")
     parser.add_argument("--pawaga-descriptor", default="Pawaga_20210726_cal1.sorghumls")
     parser.add_argument("--seed", type=int, default=SEED)
@@ -46,8 +52,13 @@ def main() -> int:
     args.out_dir.mkdir(parents=True, exist_ok=True)
 
     descriptors = stage_descriptors("v1", args.btx_descriptor, args.pawaga_descriptor)
-    row_genotypes, center_z = LAYOUTS[args.layout]
-    expected = len(row_genotypes) * COLUMNS
+    # "pair" is local to this script: two rows of one plant, spaced so neither
+    # canopy overlaps the other in a side view.
+    layouts = dict(LAYOUTS, pair=(["BTX", "Pawaga"], 0.0))
+    row_genotypes, center_z = layouts[args.layout]
+    columns = args.columns or (1 if args.layout == "pair" else COLUMNS)
+    row_spacing = args.row_spacing or (1.6 if args.layout == "pair" else ROW_SPACING_M)
+    expected = len(row_genotypes) * columns
 
     configure_engine_imports()
     os.chdir(BUILD / "PythonBinding" / CONFIG)
@@ -60,8 +71,8 @@ def main() -> int:
         raise SystemExit(f"failed to load {SCENE}")
     evo.WaitForProjectIdle(args.max_wait_frames)
 
-    if int(evo.ConfigureSorghumLsPlantingGrid(row_genotypes, COLUMNS, COLUMN_SPACING_M,
-                                              ROW_SPACING_M, CENTER_X_M, center_z)) != expected:
+    if int(evo.ConfigureSorghumLsPlantingGrid(row_genotypes, columns, COLUMN_SPACING_M,
+                                              row_spacing, CENTER_X_M, center_z)) != expected:
         raise SystemExit(f"expected {expected} planting markers")
     if int(evo.InstantiateSorghumLsPlantsFromPlantingMarkers()) != expected:
         raise SystemExit(f"failed to instantiate {expected} plants")
@@ -70,7 +81,7 @@ def main() -> int:
         raise SystemExit("descriptor bind failed")
     evo.ConfigureSorghumLsLeafMeshQuality(args.leaf_vsub, args.leaf_hsub, False, True, False)
     print(f"growing {expected} plants to adulthood ({args.layout}: "
-          f"{len(row_genotypes)} rows x {COLUMNS})", flush=True)
+          f"{len(row_genotypes)} rows x {columns})", flush=True)
     if int(evo.GrowSorghumLsPlantsToAdulthood(args.seed, "", False, True)) != expected:
         raise SystemExit("growth failed")
     if not evo.WaitForProjectIdle(args.max_wait_frames):
@@ -88,9 +99,9 @@ def main() -> int:
     sidecar = {
         "layout": args.layout,
         "row_genotypes": row_genotypes,
-        "columns": COLUMNS,
+        "columns": columns,
         "column_spacing_m": COLUMN_SPACING_M,
-        "row_spacing_m": ROW_SPACING_M,
+        "row_spacing_m": row_spacing,
         "center_x_m": CENTER_X_M,
         "center_z_m": center_z,
         "seed": args.seed,
