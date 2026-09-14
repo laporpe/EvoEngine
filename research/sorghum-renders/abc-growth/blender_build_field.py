@@ -27,7 +27,7 @@ from mathutils import Vector
 # ----------------------------------------------------------------- targets ---
 SOIL_BASE = (0.310, 0.105, 0.048, 1.0)      # rust, IMG_4163 sunlit alley
 SOIL_DARK = (0.120, 0.045, 0.025, 1.0)      # damp clods and shadow
-LITTER = (0.420, 0.330, 0.170, 1.0)         # dried blades on the ground, IMG_4137
+LITTER = (0.300, 0.215, 0.105, 1.0)         # dried blades on the ground, IMG_4137
 PANICLE = (0.560, 0.500, 0.290, 1.0)        # pale straw, IMG_4163
 CULM_BLOOM = (0.480, 0.560, 0.430, 1.0)     # glaucous wax on stems, IMG_4171
 SUN_ELEVATION_DEG = 52.0                    # August, late morning, Maricopa
@@ -524,4 +524,5 @@ def main() -> None:
     print(f"[field] saved {out.name} - {len(bpy.data.objects)} objects")
 
 
-main()
+if __name__ == "__main__":
+    main()
