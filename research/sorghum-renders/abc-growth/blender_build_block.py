@@ -30,6 +30,8 @@ sys.path.insert(0, str(HERE))
 import blender_build_field as field  # noqa: E402
 
 EXPORT = HERE / "blender-export"
+# Each camera is rendered at its own size; projections must use the same frame.
+CAMERA_RES = {"CamTopDown": (1500, 2000), "CamCrossSection": (2400, 1100)}
 SUN_DEFAULT_EL, SUN_DEFAULT_AZ = 74.0, 149.0        # 12:00 MST 2021-07-26, from the figure
 POLE_GREY = (0.62, 0.63, 0.65, 1.0)
 PANEL_GREY = (0.30, 0.31, 0.33, 1.0)
@@ -100,6 +102,92 @@ def build_parbar_rig(sidecar):
             head.data.materials.append(panel_mat)
             made += 2
     print(f"[block] PARBAR rig: {made} objects (middle bars at {mean_h * 2 / 3:.2f} m)")
+
+
+FLAG = {"BTX": (0.10, 0.36, 0.85, 1.0), "Pawaga": (0.85, 0.30, 0.08, 1.0)}   # blue / orange tape
+
+
+def rows_from_plants(plants):
+    """Per-row extent from the imported plant roots, named <geno>_LSystem_R<i>_C<j>."""
+    import re
+    rows = {}
+    for p in plants:
+        if p.parent is not None:
+            continue
+        m = re.match(r"(\w+)_LSystem_R(\d+)_C(\d+)", p.name)
+        if not m:
+            continue
+        geno, i = m.group(1), int(m.group(2))
+        r = rows.setdefault(i, {"genotype": geno, "xs": [], "ys": []})
+        r["xs"].append(p.matrix_world.translation.x)
+        r["ys"].append(p.matrix_world.translation.y)
+    return {i: {"genotype": r["genotype"], "x_min": min(r["xs"]), "x_max": max(r["xs"]),
+                "y": sum(r["ys"]) / len(r["ys"])} for i, r in rows.items()}
+
+
+def build_row_stakes(rows, lo):
+    """A plot stake with a flag at the south end of every row.
+
+    This is how a trial is actually marked in the field, and it is the only
+    honest way to make the genotype boundary legible end-on: seven rows of
+    sorghum look alike, but seven flags in two colours do not.
+    """
+    stake_mat = bpy.data.materials.new("StakeWood")
+    stake_mat.use_nodes = True
+    stake_mat.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = (0.55, 0.42, 0.25, 1)
+    flag_mats = {}
+    for geno, colour in FLAG.items():
+        m = bpy.data.materials.new(f"Flag_{geno}")
+        m.use_nodes = True
+        m.node_tree.nodes["Principled BSDF"].inputs["Base Color"].default_value = colour
+        m.node_tree.nodes["Principled BSDF"].inputs["Roughness"].default_value = 0.8
+        flag_mats[geno] = m
+    for i, r in sorted(rows.items()):
+        x, y = r["x_min"] - 0.45, r["y"]
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.012, depth=0.75, location=(x, y, lo.z + 0.375))
+        stake = bpy.context.active_object
+        stake.name = f"Stake_R{i}_{r['genotype']}"
+        stake.data.materials.append(stake_mat)
+        # Vertical tape facing the end-view camera (normal along X): rotating the
+        # plane about Y sends its local X to world Z, so scale (height, width, 1).
+        bpy.ops.mesh.primitive_plane_add(size=1.0, location=(x - 0.006, y + 0.08, lo.z + 0.66))
+        flag = bpy.context.active_object
+        flag.name = f"Flag_R{i}_{r['genotype']}"
+        flag.rotation_euler = (0.0, math.radians(90.0), 0.0)
+        flag.scale = (0.09, 0.16, 1.0)
+        flag.data.materials.append(flag_mats[r["genotype"]])
+        # Horizontal tag on the stake top so the nadir view reads the colour too.
+        bpy.ops.mesh.primitive_cylinder_add(radius=0.05, depth=0.01, location=(x, y, lo.z + 0.755))
+        tag = bpy.context.active_object
+        tag.name = f"Tag_R{i}_{r['genotype']}"
+        tag.data.materials.append(flag_mats[r["genotype"]])
+    print(f"[block] row stakes: {len(rows)} ({', '.join(r['genotype'] for _, r in sorted(rows.items()))})")
+
+
+def write_row_screen_positions(rows, cams, lo, out_json):
+    """Where each row's base lands in each camera, for the annotation pass."""
+    from bpy_extras.object_utils import world_to_camera_view
+    scene = bpy.context.scene
+    # The cameras were just created and moved; their world matrices are not
+    # valid until the dependency graph runs, and projecting through a stale
+    # identity matrix puts every row a hundred frames off-screen.
+    bpy.context.view_layer.update()
+    result = {}
+    for cam in cams:
+        # world_to_camera_view derives the frame from the scene resolution, so
+        # set it to what this camera is actually rendered at.
+        if cam.name in CAMERA_RES:
+            scene.render.resolution_x, scene.render.resolution_y = CAMERA_RES[cam.name]
+        entry = {}
+        for i, r in sorted(rows.items()):
+            base = Vector(((r["x_min"] + r["x_max"]) * 0.5, r["y"], lo.z))
+            near = Vector((r["x_min"], r["y"], lo.z))
+            u, v, _ = world_to_camera_view(scene, cam, base)
+            un, vn, _ = world_to_camera_view(scene, cam, near)
+            entry[str(i)] = {"genotype": r["genotype"], "u": u, "v": v, "u_near": un, "v_near": vn}
+        result[cam.name] = entry
+    Path(out_json).write_text(json.dumps(result, indent=1))
+    print(f"[block] wrote row screen positions -> {Path(out_json).name}")
 
 
 def cameras(lo, hi, sidecar, opts):
@@ -188,8 +276,11 @@ def main() -> None:
     field.scatter_litter(rng, lo, hi, opts["litter"])
     field.build_sky(opts)
     build_parbar_rig(sidecar)
-    cameras(lo, hi, sidecar, opts)
+    rows = rows_from_plants(plants)
+    build_row_stakes(rows, lo)
+    top, cross = cameras(lo, hi, sidecar, opts)
     field.configure_render(bpy.context.scene, opts)
+    write_row_screen_positions(rows, (top, cross), lo, out.with_name(out.stem + "_rows.json"))
 
     bpy.ops.wm.save_as_mainfile(filepath=str(out))
     print(f"[block] saved {out.name} - {len(bpy.data.objects)} objects")

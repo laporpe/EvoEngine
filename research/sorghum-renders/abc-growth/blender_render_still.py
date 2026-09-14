@@ -17,7 +17,7 @@ def main() -> None:
     argv = sys.argv[sys.argv.index("--") + 1:] if "--" in sys.argv else []
     positional = [a for a in argv if "=" not in a]
     opts = {"exposure": None, "samples": None, "scale": 100, "frame": 1,
-            "camera": None, "res": None}
+            "camera": None, "res": None, "device": None}
     for a in argv:
         if "=" in a:
             k, v = a.split("=", 1)
@@ -32,6 +32,20 @@ def main() -> None:
         scene.view_settings.exposure = float(opts["exposure"])
     if opts["samples"] is not None and scene.render.engine == "CYCLES":
         scene.cycles.samples = int(opts["samples"])
+    if opts["device"] and scene.render.engine == "CYCLES":
+        # CUDA can run beside an OptiX render that already holds the GPU; a
+        # second OptiX process cannot.
+        dev = str(opts["device"]).upper()
+        prefs = bpy.context.preferences.addons["cycles"].preferences
+        if dev in ("CUDA", "OPTIX"):
+            prefs.compute_device_type = dev
+            prefs.get_devices()
+            for d in prefs.devices:
+                d.use = d.type == dev
+            scene.cycles.device = "GPU"
+            scene.cycles.denoiser = "OPENIMAGEDENOISE" if dev == "CUDA" else scene.cycles.denoiser
+        else:
+            scene.cycles.device = "CPU"
     if opts["camera"]:
         cam = bpy.data.objects.get(opts["camera"])
         if cam is None:
