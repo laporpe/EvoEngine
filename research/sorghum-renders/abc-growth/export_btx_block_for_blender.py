@@ -32,7 +32,7 @@ SEED = 422021                       # render_field_publication.py default
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--layout", default="small", choices=sorted(LAYOUTS) + ["pair"],
+    parser.add_argument("--layout", default="small", choices=sorted(LAYOUTS) + ["pair", "plots"],
                         help="a layout from run_tau_diurnal, or 'pair': one BTX beside one "
                              "Pawaga for a side-by-side comparison")
     parser.add_argument("--columns", type=int, default=None,
@@ -54,7 +54,12 @@ def main() -> int:
     descriptors = stage_descriptors("v1", args.btx_descriptor, args.pawaga_descriptor)
     # "pair" is local to this script: two rows of one plant, spaced so neither
     # canopy overlaps the other in a side view.
-    layouts = dict(LAYOUTS, pair=(["BTX", "Pawaga"], 0.0))
+    # Local layouts. "plots": one four-row plot per genotype, rows z = 0..7, which
+    # puts the PARBAR at z = 1.5 between BTX rows 1-2 and the one at z = 5.5
+    # between Pawaga rows 5-6 - the field's arrangement. run_tau_diurnal's
+    # "small" is 4 + 3 and does not match the field's two four-row plots.
+    layouts = dict(LAYOUTS, pair=(["BTX", "Pawaga"], 0.0),
+                   plots=(["BTX"] * 4 + ["Pawaga"] * 4, 3.5))
     row_genotypes, center_z = layouts[args.layout]
     columns = args.columns or (1 if args.layout == "pair" else COLUMNS)
     row_spacing = args.row_spacing or (1.6 if args.layout == "pair" else ROW_SPACING_M)
