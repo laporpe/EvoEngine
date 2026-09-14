@@ -40,6 +40,7 @@
 #  include "RayTracerLayer.hpp"
 #endif
 
+#include <pybind11/numpy.h>
 #include <algorithm>
 #include <cctype>
 #include <cmath>
@@ -1587,6 +1588,8 @@ void PyDigitalAgriculture::Initialize(pybind11::module& m) {
         py::arg("update_render_geometry") = true);
   m.def("GrowSorghumLsPlantsToGdd", &GrowSorghumLsPlantsToGdd, py::arg("evaluation_gdd"), py::arg("seed_base") = -1,
         py::arg("update_render_geometry") = true);
+  m.def("GetSorghumLsGeometrySnapshots", &GetSorghumLsGeometrySnapshots,
+        "Copy current plant-local meshes and world transforms into owned NumPy arrays.");
   m.def("AdvanceSorghumLsPlantsToGdd", &AdvanceSorghumLsPlantsToGdd, py::arg("evaluation_gdd"),
         py::arg("seed_base") = -1, py::arg("update_render_geometry") = true);
   m.def("MaterializeSorghumLsPlantGeometry", &MaterializeSorghumLsPlantGeometry,
@@ -2594,6 +2597,99 @@ size_t PyDigitalAgriculture::AdvanceSorghumLsPlantsToGdd(const float evaluation_
                                                          const bool update_render_geometry) {
   const auto layer = ApplicationContext::Get().GetLayer<LSystemLayer>();
   return layer ? layer->AdvanceSorghumScene(evaluation_gdd, seed_base, update_render_geometry) : 0;
+}
+
+py::list PyDigitalAgriculture::GetSorghumLsGeometrySnapshots() {
+  py::list result;
+  const auto scene = ApplicationContext::Get().GetActiveScene();
+  if (!scene) {
+    throw std::runtime_error("No active scene for sorghum geometry export.");
+  }
+  const auto* owners = scene->UnsafeGetPrivateComponentOwnersList<SorghumLS>();
+  if (!owners) {
+    return result;
+  }
+  const auto copy_mesh = [](const std::vector<Vertex>& vertices, const std::vector<glm::uvec3>& triangles) {
+    const auto count = static_cast<py::ssize_t>(vertices.size());
+    py::array_t<float> positions({count, py::ssize_t{3}}), normals({count, py::ssize_t{3}});
+    py::array_t<float> uv({count, py::ssize_t{2}}), colors({count, py::ssize_t{4}});
+    py::array_t<uint32_t> indices({static_cast<py::ssize_t>(triangles.size()), py::ssize_t{3}});
+    for (size_t i = 0; i < vertices.size(); ++i) {
+      for (int j = 0; j < 3; ++j) {
+        positions.mutable_data()[i * 3 + j] = vertices[i].position[j];
+        normals.mutable_data()[i * 3 + j] = vertices[i].normal[j];
+      }
+      for (int j = 0; j < 2; ++j) {
+        uv.mutable_data()[i * 2 + j] = vertices[i].tex_coord[j];
+      }
+      for (int j = 0; j < 4; ++j) {
+        colors.mutable_data()[i * 4 + j] = vertices[i].color[j];
+      }
+    }
+    for (size_t i = 0; i < triangles.size(); ++i) {
+      for (int j = 0; j < 3; ++j) {
+        indices.mutable_data()[i * 3 + j] = triangles[i][j];
+      }
+    }
+    py::dict mesh;
+    mesh["positions"] = std::move(positions);
+    mesh["normals"] = std::move(normals);
+    mesh["uv"] = std::move(uv);
+    mesh["colors"] = std::move(colors);
+    mesh["triangles"] = std::move(indices);
+    return mesh;
+  };
+  for (const auto& entity : *owners) {
+    if (!scene->IsEntityValid(entity)) {
+      continue;
+    }
+    const auto plant = scene->GetOrSetPrivateComponent<SorghumLS>(entity).lock();
+    const auto& snapshot = plant->GetGeometrySnapshot();
+    if (!snapshot) {
+      throw std::runtime_error("Plant has no geometry snapshot; evaluate growth before exporting.");
+    }
+    py::dict record;
+    record["entity_handle"] = scene->GetEntityHandle(entity).GetValue();
+    record["name"] = scene->GetEntityName(entity);
+    record["genotype"] = CultivarFromPlantName(scene->GetEntityName(entity));
+    record["seed"] = snapshot->seed;
+    record["requested_gdd"] = plant->target_gdd;
+    record["evaluated_gdd"] = plant->growth_model.accumulated_gdd;
+    record["geometry_version"] = snapshot->geometry_version;
+    record["snapshot_schema_version"] = snapshot->schema_version;
+    if (const auto descriptor = plant->descriptor_ref.Get<SorghumLSDescriptor>()) {
+      record["descriptor_path"] = descriptor->GetAssetsFolderRelativePath().generic_string();
+    }
+    py::array_t<float> world({py::ssize_t{4}, py::ssize_t{4}});
+    const auto transform = scene->GetDataComponent<GlobalTransform>(entity).value;
+    for (int row = 0; row < 4; ++row) {
+      for (int column = 0; column < 4; ++column) {
+        world.mutable_data()[row * 4 + column] = transform[column][row];
+      }
+    }
+    record["world_transform"] = std::move(world);
+    record["culm"] = copy_mesh(snapshot->culm_vertices, snapshot->culm_triangles);
+    record["leaves"] = copy_mesh(snapshot->leaf_vertices, snapshot->leaf_triangles);
+    record["panicle"] = copy_mesh(snapshot->panicle_vertices, snapshot->panicle_triangles);
+    py::list organs;
+    for (const auto& range : snapshot->organ_ranges) {
+      py::dict organ;
+      organ["kind"] = static_cast<uint8_t>(range.kind);
+      organ["axis_id"] = range.axis_id;
+      organ["rank"] = range.rank;
+      organ["node_id"] = range.node_id;
+      organ["vertex_offset"] = range.vertex_offset;
+      organ["vertex_count"] = range.vertex_count;
+      organ["triangle_offset"] = range.triangle_offset;
+      organ["triangle_count"] = range.triangle_count;
+      organ["instance_offset"] = range.instance_offset;
+      organ["instance_count"] = range.instance_count;
+      organs.append(std::move(organ));
+    }
+    record["organ_ranges"] = std::move(organs);
+    result.append(std::move(record));
+  }
+  return result;
 }
 
 size_t PyDigitalAgriculture::MaterializeSorghumLsPlantGeometry(const bool update_render_geometry) {

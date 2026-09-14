@@ -139,6 +139,13 @@ The export is a snapshot at one thermal age - the plants are rebuilt from the
 L-system at whatever GDD you grow to, so pick `--gdd` to match the growth stage
 you want rather than expecting an animated sequence.
 
+For **growth animation**, `GetSorghumLsGeometrySnapshots()` exposes the same native
+culm, leaf and panicle meshes as owned arrays. `GrowthGeometryExporter` records
+samples from your existing simulation without changing growth settings. The
+Blender builder creates an animated USD cache and an editable Cycles scene.
+See [the growth export quick start](../../docs/sorghum-growth-blender.md) for the
+reusable API, A/B/C example, validation, and Blender handoff.
+
 ## Interpreting the output
 
 `render_abc_growth.py` plots **culm tip height**, derived from internodes. Internodes only

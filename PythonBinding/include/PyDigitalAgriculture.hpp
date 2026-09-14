@@ -347,6 +347,8 @@ class PyDigitalAgriculture {
                                                bool update_render_geometry = true);
 
   static size_t GrowSorghumLsPlantsToGdd(float evaluation_gdd, int seed_base = -1, bool update_render_geometry = true);
+  // Copies the current CPU meshes; does not grow, regenerate, or reparent plants.
+  static pybind11::list GetSorghumLsGeometrySnapshots();
 
   /// Advance a GDD-ordered sequence without replaying each plant from zero.
   static size_t AdvanceSorghumLsPlantsToGdd(float evaluation_gdd, int seed_base = -1,
